@@ -92,6 +92,10 @@ export function NetWorthChart({
   const values = data.map((d) => d.net);
   const flat = values.length > 0 && Math.max(...values) === Math.min(...values);
   const pad = flat ? Math.max(Math.abs(values[0]) * 0.2, 100) : 0;
+  // On a narrow range, compact labels ("$2.5K") collide: show whole amounts instead.
+  const spread = values.length ? Math.max(...values) - Math.min(...values) : 0;
+  const peak = values.length ? Math.max(...values.map(Math.abs)) : 0;
+  const compact = flat || spread >= peak * 0.25;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
@@ -100,8 +104,8 @@ export function NetWorthChart({
         <YAxis
           {...AXIS}
           axisLine={false}
-          width={64}
-          tickFormatter={(v) => f.units(v, { compact: true })}
+          width={compact ? 64 : 80}
+          tickFormatter={(v) => (compact ? f.units(v, { compact: true }) : f.units(v, { whole: true }))}
           domain={flat ? [Math.max(0, values[0] - pad), values[0] + pad] : ["auto", "auto"]}
         />
         <Tooltip

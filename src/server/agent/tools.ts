@@ -10,7 +10,7 @@ import { ensureFreshRates, fxConverter, latestFxDate } from "@/server/services/f
 import { refreshPrices, searchSymbols } from "@/server/services/prices";
 import { netWorthHistory, netWorthOn } from "@/server/services/networth";
 import { getOverview } from "@/server/services/overview";
-import { today } from "@/server/services/settings";
+import { getSettings, today } from "@/server/services/settings";
 import { purchaseInputSchema, simulatePurchase, capacityInputSchema, borrowingCapacity } from "@/lib/finance/mortgage";
 import { buyVsRentInputSchema, simulateBuyVsRent } from "@/lib/finance/buy-vs-rent";
 import { blendedAssumptions, projectNetWorth, projectionInputSchema } from "@/lib/finance/projection";
@@ -529,7 +529,7 @@ export async function callTool(ctx: ToolContext, name: string, rawInput: unknown
   try {
     const result = await t.run(parsed.data, ctx);
     if (!t.readOnly) invalidateSqlSandbox(ctx.userId);
-    return { ok: true, content: JSON.stringify(present(result)) };
+    return { ok: true, content: JSON.stringify(present(labelCurrency(t.name, result, ctx.userId))) };
   } catch (err) {
     return { ok: false, content: err instanceof Error ? err.message : String(err) };
   }
@@ -539,6 +539,31 @@ export async function callTool(ctx: ToolContext, name: string, rawInput: unknown
  * Make service output model-friendly: `xxxCents` fields become `xxx` in
  * currency units, Dates become ISO strings, Buffers and undefined are dropped.
  */
+/** Tools whose amounts aren't the user's money (pure calculators, explicit conversions, raw SQL, file text). */
+const UNLABELED = new Set([
+  "simulate_mortgage",
+  "borrowing_capacity",
+  "simulate_buy_vs_rent",
+  "convert_currency",
+  "search_symbol",
+  "query_sql",
+  "read_upload",
+  "list_uploads",
+]);
+
+/**
+ * Say which currency the amounts are in. Clients outside the app (MCP) can't
+ * know the user's base currency otherwise, and guess. Objects that already
+ * carry `currency` keep it; arrays become `{ baseCurrency, items }`.
+ */
+export function labelCurrency(tool: string, value: unknown, uid: string): unknown {
+  if (UNLABELED.has(tool) || value === null || typeof value !== "object" || value instanceof Date) return value;
+  const baseCurrency = getSettings(uid).currency;
+  if (Array.isArray(value)) return { baseCurrency, items: value };
+  if ("currency" in value || "baseCurrency" in value) return value;
+  return { baseCurrency, ...value };
+}
+
 export function present(value: unknown): unknown {
   if (value === null || value === undefined) return value;
   if (value instanceof Date) return value.toISOString();

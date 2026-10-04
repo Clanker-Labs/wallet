@@ -1,6 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { getSettings } from "@/server/services/settings";
 import { callTool, enabledTools } from "./tools";
 import { systemPrompt } from "./prompt";
+
+/** The user's base currency for the server instructions, if a user exists yet. */
+function baseCurrency(resolveUserId: () => string): string | null {
+  try {
+    return getSettings(resolveUserId()).currency;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * An MCP server exposing every wallet tool, acting for one user (resolved
@@ -12,7 +22,9 @@ export function createWalletMcpServer(resolveUserId: () => string): McpServer {
     {
       instructions:
         "Tools for the user's self-hosted Wallet app (net worth, investments, budgets, transactions, reminders, simulations). " +
-        "Start with get_overview. Amounts in tool results are in currency units; totals are in the user's base currency.",
+        "Start with get_overview. Amounts in tool results are in currency units (not cents). Totals are in the user's base currency" +
+        (baseCurrency(resolveUserId) ? ` (${baseCurrency(resolveUserId)})` : "") +
+        ", named by `currency` or `baseCurrency` in each result; rows with their own `currency` are in that currency.",
     },
   );
 

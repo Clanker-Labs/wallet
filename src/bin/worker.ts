@@ -7,9 +7,7 @@
  */
 import fs from "node:fs";
 import { db, dbPath } from "@/server/db/client";
-import { ensureFreshRates } from "@/server/services/fx";
-import { refreshPrices } from "@/server/services/prices";
-import { snapshotHoldingAccounts } from "@/server/services/accounts";
+import { refreshMarketData as refreshMarket } from "@/server/services/market";
 import { listUsers } from "@/server/services/users";
 import { allowedChatIds, createApi, TelegramError, type TelegramApi } from "@/server/telegram/api";
 import { handleUpdate, type BotContext } from "@/server/telegram/bot";
@@ -22,15 +20,7 @@ const MARKET_EVERY_MS = 60 * 60_000;
 
 /** Daily FX rates + market prices, then today's value of holdings-based accounts. */
 async function refreshMarketData() {
-  try {
-    await ensureFreshRates();
-    const r = await refreshPrices();
-    if (r.updated.length) log(`📈 prices updated: ${r.updated.join(", ")}`);
-    if (r.failed.length) log(`⚠️ prices: ${r.failed.map((f) => f.error).join("; ")}`);
-    for (const u of listUsers()) snapshotHoldingAccounts(u.id);
-  } catch (e) {
-    log(`⚠️ market data: ${errorText(e)}`);
-  }
+  for (const line of (await refreshMarket()).log) log(line);
 }
 
 const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);

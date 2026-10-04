@@ -85,4 +85,4 @@ npm run build && npm start   # the web app
 npm run worker               # Telegram bot, reminders, hourly FX rates and prices
 ```
 
-Keep both running (systemd, pm2, launchd…). Without the worker, reminders don't go out, exchange rates only update when you click refresh in **Settings → Exchange rates**, prices only when you open **Investments**, and investment accounts get no daily value snapshot. Put it behind HTTPS before using it from other devices; [Deployment](deployment.html) covers reverse proxies, `WALLET_PUBLIC_URL` and backups.
+Keep both running (systemd, pm2, launchd…). The worker is only needed for Telegram and reminders. Exchange rates, prices and investment snapshots are also refreshed by the web app in the background while you use it. Put it behind HTTPS before using it from other devices; [Deployment](deployment.html) covers reverse proxies, `WALLET_PUBLIC_URL` and backups.

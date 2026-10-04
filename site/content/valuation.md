@@ -32,8 +32,9 @@ Closes go into `prices(symbol, date)` with `INSERT OR REPLACE`, upper-cased symb
 
 | Caller | Call |
 |---|---|
-| Worker, every hour | `refreshPrices()`, then `snapshotHoldingAccounts()` for every user |
-| Opening **Investments** | `ensureFreshPrices()` after the response is sent: at most every 30 minutes per process |
+| Worker, every hour | `refreshMarketData()`: `ensureFreshRates()`, `refreshPrices()`, then `snapshotHoldingAccounts()` for every user |
+| Any signed-in page load | `refreshMarketDataInBackground()` from the root layout via `after()`: the same work, at most every 30 minutes per process, never blocking the response |
+| Opening **Investments** | Also `ensureFreshPrices()` after the response is sent: at most every 30 minutes per process |
 | **Refresh prices**, `refresh_prices` tool | `refreshPrices({ maxAgeHours: 0 })`, then a snapshot |
 | `upsert_holding` / adding a position | That symbol (`1y` when new to the account, `5d` otherwise), then a snapshot |
 
@@ -52,7 +53,7 @@ Every page or tool that values things builds one `valuationContext(uid)`: the us
 
 ## Why accounts are snapshotted
 
-Quantities change: you sell half a position, or move a fund to another account. Valuing last March with *today's* quantities would rewrite history. So `snapshotHoldingAccounts(uid)` records each holdings-based account's value for today as an ordinary balance snapshot (`source = "holdings"`, one per day, upserted). The worker does it hourly for everyone, and every holding change does it too.
+Quantities change: you sell half a position, or move a fund to another account. Valuing last March with *today's* quantities would rewrite history. So `snapshotHoldingAccounts(uid)` records each holdings-based account's value for today as an ordinary balance snapshot (`source = "holdings"`, one per day, upserted). The worker does it hourly for everyone, the web app does it in the background (at most every 30 minutes), and every holding change does it too.
 
 `balanceOnDate()` for an account with holdings:
 

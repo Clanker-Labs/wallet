@@ -5,7 +5,7 @@ section: technical
 order: 7
 ---
 
-wallet is two processes over one SQLite file: the **web app** (Next.js) and an optional **worker** (Telegram, reminders, hourly FX rates and prices). Keep the file safe and put HTTPS in front.
+wallet is two processes over one SQLite file: the **web app** (Next.js) and an optional **worker** for Telegram and reminders. Exchange rates, prices and investment snapshots stay fresh either way: the worker refreshes them hourly, and the web app does it itself after requests, at most every 30 minutes. Keep the file safe and put HTTPS in front.
 
 ## Docker Compose
 
@@ -21,7 +21,7 @@ docker compose logs -f worker
 | Service | Runs | Notes |
 |---|---|---|
 | `web` | `node server.js` (Next.js standalone output) | Published on **loopback only**: `127.0.0.1:${WALLET_PORT:-3000}`. Healthcheck: `GET /api/health` every 30 s. |
-| `worker` | `tsx src/bin/worker.ts` | Behind the **`telegram` profile**, so it only starts with `--profile telegram`. It needs `TELEGRAM_BOT_TOKEN`; without it, it exits with setup instructions, which under a restart policy would be a crash loop. It also refreshes exchange rates and prices hourly and snapshots investment accounts. Without it, rates update when you click refresh in **Settings → Exchange rates** and prices when you open **Investments**. |
+| `worker` | `tsx src/bin/worker.ts` | Behind the **`telegram` profile**, so it only starts with `--profile telegram`. It needs `TELEGRAM_BOT_TOKEN`; without it, it exits with setup instructions, which under a restart policy would be a crash loop. It also refreshes exchange rates and prices hourly and snapshots investment accounts. Without it, the web app does the same in the background while it's in use, at most every 30 minutes. Only reminders and the bot need the worker. |
 
 Two variables control where things go. Neither is needed to run it locally:
 

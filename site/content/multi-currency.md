@@ -45,7 +45,7 @@ Rates are **shared** by all users (they carry no personal data) and written with
 | `updated` | Fetched and stored. |
 | `failed` | Every source failed; logged as a warning, and conversions keep using the last stored rates. |
 
-Concurrent calls share one in-flight request. It's called by the worker every hour, by the stdio MCP server on start, by the `convert_currency` tool, and with `force` by **Settings → Exchange rates → Refresh**. `backfillRates(dates)` can fetch specific past days that are missing (one request per date); `npm run db:seed-demo` instead stores synthetic history directly.
+Concurrent calls share one in-flight request. It's called by the worker every hour, by the web app in the background after signed-in page loads (at most every 30 minutes, via `refreshMarketDataInBackground()` in [src/server/services/market.ts](gh:src/server/services/market.ts)), by the stdio MCP server on start, by the `convert_currency` tool, and with `force` by **Settings → Exchange rates → Refresh**. `backfillRates(dates)` can fetch specific past days that are missing (one request per date); `npm run db:seed-demo` instead stores synthetic history directly.
 
 ## The converter
 

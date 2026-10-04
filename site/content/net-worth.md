@@ -34,7 +34,7 @@ The **balance** of an account on a date depends on its kind ([Holdings & valuati
 |---|---|
 | Manual (bank, savings, property…) | Its latest balance snapshot on or before that date. |
 | Loan with loan terms | Remaining principal from the amortization schedule; nothing to record. |
-| Holds investments | Today: quantity × latest price for each holding. Past dates: the value snapshot of that day or earlier (recorded hourly by the worker and on every change), else today's quantities × that day's prices. |
+| Holds investments | Today: quantity × latest price for each holding. Past dates: the value snapshot of that day or earlier (recorded hourly by the worker or the web app's background refresh, and on every change), else today's quantities × that day's prices. |
 | Archived | Its last balance until the archive date, then 0. |
 
 Each amount is converted with the exchange rate **of that date** (the latest stored rate on or before it), so last year's EUR savings are valued at last year's EUR rate ([Multi-currency internals](multi-currency.html)). The 1M / YTD / 1Y changes compare today with the same computation on the reference date (YTD uses December 31 of last year).

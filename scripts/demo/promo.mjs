@@ -15,10 +15,10 @@ const SHOTS = {
   netWorth: ["net-worth", 1.0, 5.5, 1.25],
   accounts: ["accounts", 2.0, 4.5, 1.3],
   investments: ["investments", 1.0, 4.5, 1.3],
-  assistant: ["assistant", 1.0, 9.0, 1.6],
+  assistant: ["assistant", 0.3, 9.0, 1.6],
   simulations: ["simulations", 2.0, 4.5, 1.4],
-  telegram: ["telegram", 9.0, 5.0, 1.4],
-  mcp: ["mcp", 2.0, 5.0, 1.5],
+  telegram: ["telegram", 10.0, 5.5, 1.4],
+  mcp: ["mcp", 6.5, 5.5, 1.6],
   signup: ["signup", 2.0, 4.0, 1.3],
 };
 const PHONE_SLOT = { x: 1230, y: 60, w: 450, h: 960, r: 60 }; // device px, matches the card's CSS slot ×1.5

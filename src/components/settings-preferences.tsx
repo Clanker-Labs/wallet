@@ -4,10 +4,10 @@ import { useEffect, useId, useState, useTransition } from "react";
 import { DateTime } from "luxon";
 import { formatMoney } from "@/lib/money";
 import { savePreferences } from "@/app/settings/actions";
-import { Button, Input } from "./ui";
+import { COMMON_CURRENCIES } from "@/lib/domain";
+import { Button, Input, Select } from "./ui";
 import { Flash, useFlash } from "./settings-kit";
 
-const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "CAD", "AUD", "JPY", "SEK", "NOK", "DKK", "PLN"];
 const LOCALES = ["fr-FR", "en-IE", "en-GB", "en-US", "de-DE", "es-ES", "it-IT", "nl-NL", "pt-PT", "fr-CH", "de-CH", "fr-BE"];
 
 interface Prefs {
@@ -25,14 +25,34 @@ function sample(p: Prefs): string | null {
   }
 }
 
-export function PreferencesForm({ initial, timezones }: { initial: Prefs; timezones: string[] }) {
+/** Label for a currency code in the picker: "EUR · Euro". */
+function currencyLabel(code: string, names: Record<string, string>) {
+  const name = names[code];
+  return name && name !== code ? `${code} · ${name}` : code;
+}
+
+export function PreferencesForm({
+  initial,
+  timezones,
+  otherCurrencies = [],
+  currencyNames = {},
+}: {
+  initial: Prefs;
+  timezones: string[];
+  /** Codes with a known exchange rate beyond COMMON_CURRENCIES. */
+  otherCurrencies?: string[];
+  currencyNames?: Record<string, string>;
+}) {
   const [values, setValues] = useState<Prefs>(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pending, startTransition] = useTransition();
   const [flash, showFlash] = useFlash(5000);
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => setNow(new Date()), []);
-  const ids = { currency: useId(), locale: useId(), timezone: useId(), lc: useId(), ll: useId(), lt: useId() };
+  const ids = { currency: useId(), locale: useId(), timezone: useId(), ll: useId(), lt: useId() };
+  const common: string[] = [...COMMON_CURRENCIES];
+  if (!common.includes(initial.currency) && !otherCurrencies.includes(initial.currency)) common.unshift(initial.currency);
+  const others = otherCurrencies.filter((c) => !common.includes(c));
 
   const set = (k: keyof Prefs, v: string) => {
     setValues((s) => ({ ...s, [k]: v }));
@@ -63,21 +83,34 @@ export function PreferencesForm({ initial, timezones }: { initial: Prefs; timezo
       }}
     >
       <div className="grid gap-4 sm:grid-cols-3">
-        <PrefField label="Currency" htmlFor={ids.currency} hint="ISO code, e.g. EUR" error={errors.currency}>
-          <Input
-            id={ids.currency}
-            list={ids.lc}
-            value={values.currency}
-            onChange={(e) => set("currency", e.target.value.toUpperCase())}
-            maxLength={3}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <datalist id={ids.lc}>
-            {CURRENCIES.map((c) => (
-              <option key={c} value={c} />
-            ))}
-          </datalist>
+        <PrefField
+          label="Base currency"
+          htmlFor={ids.currency}
+          hint={
+            values.currency !== initial.currency
+              ? `Totals, net worth and budgets will show in ${values.currency}`
+              : "Totals and net worth; accounts keep their own"
+          }
+          error={errors.currency}
+        >
+          <Select id={ids.currency} value={values.currency} onChange={(e) => set("currency", e.target.value)}>
+            <optgroup label="Common">
+              {common.map((c) => (
+                <option key={c} value={c}>
+                  {currencyLabel(c, currencyNames)}
+                </option>
+              ))}
+            </optgroup>
+            {others.length > 0 && (
+              <optgroup label="All currencies with rates">
+                {others.map((c) => (
+                  <option key={c} value={c}>
+                    {currencyLabel(c, currencyNames)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </Select>
         </PrefField>
         <PrefField label="Number format" htmlFor={ids.locale} hint="Locale, e.g. fr-FR or en-IE" error={errors.locale}>
           <Input id={ids.locale} list={ids.ll} value={values.locale} onChange={(e) => set("locale", e.target.value)} autoComplete="off" spellCheck={false} />

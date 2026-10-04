@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
 import { setSetting, type AppSettings } from "@/server/services/settings";
+import { deletePasskey, listPasskeys, renamePasskey } from "@/server/services/passkeys";
+import { ensureFreshRates, latestFxDate } from "@/server/services/fx";
+import { createTelegramLinkCode } from "@/server/services/telegram-link";
+import { linkTelegramChat } from "@/server/services/users";
 import {
   applyRulesToUncategorized,
   createCategory,
@@ -17,6 +21,7 @@ export type ActionResult = { ok: true; message?: string } | { ok: false; error: 
 
 // Settings touch every page (currency/locale come from the root layout).
 const refreshAll = () => revalidatePath("/", "layout");
+const refreshSettings = () => revalidatePath("/settings");
 
 function errorText(e: unknown): string {
   if (e instanceof ZodError) return e.issues[0]?.message ?? "Invalid input";
@@ -105,4 +110,67 @@ export async function applyRules(): Promise<ActionResult> {
   const n = applyRulesToUncategorized(uid);
   refreshAll();
   return { ok: true, message: n ? `Categorized ${n} transaction${n > 1 ? "s" : ""}` : "No uncategorized transaction matched a rule" };
+}
+
+// ── Security: passkeys ───────────────────────────────────────────────────
+
+export async function renamePasskeyAction(id: string, name: string): Promise<ActionResult> {
+  const uid = await requireUid();
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) return { ok: false, error: "Give it a name, e.g. “iPhone” or “MacBook”" };
+  if (!listPasskeys(uid).some((p) => p.id === id)) return { ok: false, error: "That passkey doesn't exist anymore" };
+  renamePasskey(uid, id, trimmed);
+  refreshSettings();
+  return { ok: true, message: "Renamed" };
+}
+
+export async function deletePasskeyAction(id: string): Promise<ActionResult> {
+  const uid = await requireUid();
+  try {
+    deletePasskey(uid, id);
+  } catch (e) {
+    return { ok: false, error: errorText(e) };
+  }
+  refreshSettings();
+  return { ok: true, message: "Passkey removed" };
+}
+
+// ── Currency: exchange rates ─────────────────────────────────────────────
+
+export type RefreshRatesResult =
+  | { ok: true; message: string; date: string | null }
+  | { ok: false; error: string; details?: string; date: string | null };
+
+/** Force a rates download now and say how it went (stored rates are kept on failure). */
+export async function refreshRatesAction(): Promise<RefreshRatesResult> {
+  await requireUid();
+  const before = latestFxDate();
+  const r = await ensureFreshRates({ force: true });
+  if (r.status === "failed") {
+    return {
+      ok: false,
+      error: r.date
+        ? "Couldn't reach the exchange-rate providers. Conversions keep using the last rates you have."
+        : "Couldn't reach the exchange-rate providers, and no rates are stored yet.",
+      details: r.error?.replace(/^Could not fetch exchange rates \((.*)\)$/, "$1").replaceAll("; ", " · "),
+      date: r.date,
+    };
+  }
+  refreshAll();
+  return { ok: true, message: r.date !== before ? `Rates updated to ${r.date}` : "Rates are up to date", date: r.date };
+}
+
+// ── Telegram ─────────────────────────────────────────────────────────────
+
+export async function createTelegramCodeAction(): Promise<{ ok: true; code: string; expiresAt: string }> {
+  const uid = await requireUid();
+  const { code, expiresAt } = createTelegramLinkCode(uid);
+  return { ok: true, code, expiresAt: expiresAt.toISOString() };
+}
+
+export async function unlinkTelegramAction(): Promise<ActionResult> {
+  const uid = await requireUid();
+  linkTelegramChat(uid, null);
+  refreshSettings();
+  return { ok: true, message: "Telegram unlinked" };
 }

@@ -7,7 +7,7 @@ import { findCategory } from "@/server/services/categories";
 import { budgetStatus } from "@/server/services/budgets";
 import { setSetting } from "@/server/services/settings";
 import { createUser, defaultUser, listUsers } from "@/server/services/users";
-import { fetchRates, fxConverter, parseCurrencyApi, storeRates } from "@/server/services/fx";
+import { currenciesInUse, ensureFreshRates, fetchRates, fxConverter, parseCurrencyApi, storeRates } from "@/server/services/fx";
 import { parseYahooChart, storePrices, yahooTypeToHolding } from "@/server/services/prices";
 import { deleteHolding, holdingsSummary, listHoldings, upsertHolding } from "@/server/services/holdings";
 import { getUpload, saveUpload, uploadKind, uploadText } from "@/server/services/uploads";
@@ -136,6 +136,27 @@ describe("exchange rates", () => {
     setSetting(uid, "currency", "EUR");
     expect(netWorthOn(uid).netCents).toBe(990_00);
     expect(netWorthOn(uid).currency).toBe("EUR");
+  });
+
+  it("reports how a forced refresh went and which currencies are in use", async () => {
+    const down = (async () => new Response("down", { status: 503 })) as unknown as typeof fetch;
+    const failed = await ensureFreshRates({ force: true, fetchImpl: down });
+    expect(failed).toMatchObject({ status: "failed", date: null });
+    expect(failed.error).toMatch(/HTTP 503/);
+    const up = (async () => Response.json({ date: TODAY, usd: { eur: 0.9, gbp: 0.75, jpy: 150, chf: 0.8 } })) as unknown as typeof fetch;
+    expect(await ensureFreshRates({ force: true, fetchImpl: up })).toEqual({ status: "updated", date: TODAY });
+    expect(await ensureFreshRates()).toEqual({ status: "fresh", date: TODAY });
+
+    const eur = createAccount(uid, { name: "Compte", type: "checking", currency: "EUR" });
+    createAccount(uid, { name: "Chase", type: "checking" });
+    addTransaction(uid, { amount: -5, currency: "GBP", description: "Tea", accountId: eur.id });
+    await upsertHolding(uid, { accountId: eur.id, symbol: "VOD.L", quantity: 1, currency: "GBP" }, { fetchPrice: false });
+    createAccount(createUser("Bob").id, { name: "Bob", type: "checking", currency: "JPY" });
+    expect(currenciesInUse(uid)).toEqual([
+      { currency: "EUR", usedIn: ["accounts"] },
+      { currency: "GBP", usedIn: ["holdings", "transactions"] },
+      { currency: "USD", usedIn: ["accounts"] },
+    ]);
   });
 
   it("flags currencies without a rate instead of mixing them", () => {

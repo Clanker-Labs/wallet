@@ -64,11 +64,14 @@ export async function quickAddTransaction(fd: FormData): Promise<TxActionState> 
   if (date && !isISODate(date)) return { ok: false, message: "Pick a valid date." };
   const category = s("categoryId");
   const account = Number(s("accountId"));
+  // "" = the account's currency (or the base currency without an account).
+  const currency = s("currency").toUpperCase() || undefined;
   try {
     addTransaction(uid, {
       date: date || undefined,
       description,
       amount,
+      currency,
       // "" = let the rules pick (service matches when undefined), "none" = leave uncategorized.
       categoryId: category === "" ? undefined : category === "none" ? null : Number(category),
       accountId: isId(account) ? account : null,

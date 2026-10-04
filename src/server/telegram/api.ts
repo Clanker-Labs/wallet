@@ -210,6 +210,32 @@ export function createApi(
 }
 
 /** Escape text for Telegram's HTML parse mode. */
+let usernameCache: { value: string | null; at: number } | null = null;
+
+/**
+ * The bot's @username, for https://t.me/<bot>?start=CODE deep links. From
+ * TELEGRAM_BOT_USERNAME, else getMe (cached: a day, or 10 minutes after a
+ * failure). Null without a bot token or when Telegram is unreachable.
+ */
+export async function botUsername(): Promise<string | null> {
+  const fromEnv = process.env.TELEGRAM_BOT_USERNAME?.trim().replace(/^@/, "");
+  if (fromEnv) return fromEnv;
+  if (!process.env.TELEGRAM_BOT_TOKEN) return null;
+  if (usernameCache && Date.now() - usernameCache.at < (usernameCache.value ? 86_400_000 : 600_000)) {
+    return usernameCache.value;
+  }
+  let value: string | null = null;
+  try {
+    const timeout = AbortSignal.timeout(3_000);
+    const api = createApi(undefined, { fetch: (url, init) => fetch(url, { ...init, signal: timeout }) });
+    value = (await api.getMe()).username ?? null;
+  } catch {
+    value = null;
+  }
+  usernameCache = { value, at: Date.now() };
+  return value;
+}
+
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }

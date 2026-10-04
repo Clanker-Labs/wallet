@@ -58,11 +58,11 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
     accountId: filters.account ? Number(filters.account) : undefined,
     search: filters.q,
   };
-  let { rows, total } = listTransactions(uid, { ...query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+  let { rows, total, currency: base } = listTransactions(uid, { ...query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
   if (rows.length === 0 && total > 0) {
     // Past the last page (e.g. after categorizing in the "Uncategorized" view): show the last one.
     page = Math.ceil(total / PAGE_SIZE);
-    ({ rows, total } = listTransactions(uid, { ...query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }));
+    ({ rows, total, currency: base } = listTransactions(uid, { ...query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }));
   }
   const totals = transactionTotals(uid, query);
   const uncategorized = countUncategorized(uid);
@@ -113,9 +113,10 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
 
         <QuickAdd
           today={t}
-          accounts={activeAccounts.map((a) => ({ id: a.id, name: a.name }))}
+          accounts={activeAccounts.map((a) => ({ id: a.id, name: a.name, currency: a.currency }))}
           defaultAccountId={defaultAccount?.id ?? null}
           defaultOpen={one(sp.add) === "1"}
+          baseCurrency={base}
         />
 
         <Card className="px-0 pb-2 sm:px-0">
@@ -203,12 +204,20 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
                     <div className="col-start-1 row-start-3 md:col-start-4 md:row-start-1">
                       <CategoryCell txId={r.id} categoryId={r.categoryId} pattern={rulePattern(r.description)} />
                     </div>
-                    <div
-                      className={`tabular col-start-2 row-start-1 text-right text-sm font-medium whitespace-nowrap md:col-start-5 md:pt-1.5 ${
-                        r.amountCents > 0 ? "text-good-text" : "text-ink"
-                      }`}
-                    >
-                      {f.money(r.amountCents, { signed: true })}
+                    <div className="tabular col-start-2 row-start-1 text-right whitespace-nowrap md:col-start-5 md:pt-1.5">
+                      <div className={`text-sm font-medium ${r.amountCents > 0 ? "text-good-text" : "text-ink"}`}>
+                        {f.money(r.amountCents, { signed: true, currency: r.currency })}
+                      </div>
+                      {r.currency !== base &&
+                        (r.baseAmountCents === 0 && r.amountCents !== 0 ? (
+                          <div className="text-xs text-muted" title={`No ${r.currency}→${base} exchange rate yet`}>
+                            no {base} rate
+                          </div>
+                        ) : (
+                          <div className="text-xs text-muted" title={`In ${base}, at the ${formatDate(r.date)} exchange rate`}>
+                            ≈ {f.money(r.baseAmountCents, { signed: true })}
+                          </div>
+                        ))}
                     </div>
                     <div className="col-start-2 row-start-3 flex justify-end md:col-start-6 md:row-start-1 md:pt-0.5">
                       <ConfirmButton action={deleteTransactionAction} fields={{ id: r.id }} title="Delete transaction" />

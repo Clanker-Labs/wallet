@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { applyMapping, parseCsv, type CsvMapping } from "@/lib/csv-import";
 import { countUncategorized, importTransactions } from "@/server/services/transactions";
-import { getAccountRow } from "@/server/services/accounts";
+import { currencySchema, getAccountRow } from "@/server/services/accounts";
 import { requireUid } from "@/server/session";
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -76,6 +76,15 @@ export async function importCsvAction(fd: FormData): Promise<ImportResult> {
     accountId = n;
   }
 
+  // "" = the account's currency (or the base currency without an account).
+  let currency: string | undefined;
+  const rawCurrency = String(fd.get("currency") ?? "").trim();
+  if (rawCurrency) {
+    const c = currencySchema.safeParse(rawCurrency);
+    if (!c.success) return { ok: false, error: c.error.issues[0]?.message ?? "Unknown currency" };
+    currency = c.data;
+  }
+
   const parsed = parseCsv(text);
   for (const col of [mapping.date, mapping.description, mapping.amount, mapping.debit, mapping.credit]) {
     if (col && !parsed.headers.includes(col)) return { ok: false, error: `Column “${col}” isn't in this file.` };
@@ -83,7 +92,7 @@ export async function importCsvAction(fd: FormData): Promise<ImportResult> {
   const { ok, errors } = applyMapping(parsed.rows, mapping);
   if (ok.length === 0) return { ok: false, error: "No readable rows with this column mapping." };
 
-  const res = importTransactions(uid, ok, accountId);
+  const res = importTransactions(uid, ok, accountId, { currency, source: "csv" });
   revalidatePath("/", "layout");
   return { ok: true, ...res, skipped: errors.length, uncategorized: countUncategorized(uid) };
 }

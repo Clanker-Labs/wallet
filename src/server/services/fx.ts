@@ -81,23 +81,40 @@ export function latestFxDate(): string | null {
   return db().select({ d: max(fxRates.date) }).from(fxRates).get()?.d ?? null;
 }
 
+export interface FxRefresh {
+  /** updated: fetched now · fresh: stored rates are recent · throttled: tried recently · failed: every source failed */
+  status: "updated" | "fresh" | "throttled" | "failed";
+  /** Latest stored rates date after the attempt. */
+  date: string | null;
+  error?: string;
+}
+
 let lastAttempt = 0;
-let inflight: Promise<void> | null = null;
+let inflight: Promise<FxRefresh> | null = null;
 
 /**
- * Refresh today's rates if the stored ones are older than a day. Throttled
- * (one attempt per 6 h per process); never throws.
+ * Refresh today's rates if the stored ones are older than a day (or always
+ * with `force`). Throttled to one attempt per 6 h per process unless forced;
+ * never throws: conversions keep using the last stored rates.
  */
-export function ensureFreshRates(opts: { force?: boolean; fetchImpl?: FetchLike } = {}): Promise<void> {
+export function ensureFreshRates(opts: { force?: boolean; fetchImpl?: FetchLike } = {}): Promise<FxRefresh> {
   const latest = latestFxDate();
   const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
   const stale = !latest || latest < yesterday;
-  if (!opts.force && (!stale || Date.now() - lastAttempt < 6 * 3_600_000)) return Promise.resolve();
   if (inflight) return inflight;
+  if (!opts.force && !stale) return Promise.resolve({ status: "fresh", date: latest });
+  if (!opts.force && Date.now() - lastAttempt < 6 * 3_600_000) return Promise.resolve({ status: "throttled", date: latest });
   lastAttempt = Date.now();
   inflight = fetchRates("latest", opts.fetchImpl)
-    .then(storeRates)
-    .catch((e) => console.warn(`[fx] ${e instanceof Error ? e.message : e}`))
+    .then((payload): FxRefresh => {
+      storeRates(payload);
+      return { status: "updated", date: latestFxDate() };
+    })
+    .catch((e): FxRefresh => {
+      const error = e instanceof Error ? e.message : String(e);
+      console.warn(`[fx] ${error}`);
+      return { status: "failed", date: latestFxDate(), error };
+    })
     .finally(() => {
       inflight = null;
     });
@@ -191,4 +208,19 @@ export function knownCurrencies(): string[] {
     .orderBy(asc(fxRates.currency))
     .all()
     .map((r) => r.c);
+}
+
+/** Currencies a user's accounts, holdings and transactions are in, with where each appears. */
+export function currenciesInUse(uid: string): { currency: string; usedIn: ("accounts" | "holdings" | "transactions")[] }[] {
+  const rows = db()
+    .$client.prepare(
+      `SELECT upper(currency) AS currency, 'accounts' AS src FROM accounts WHERE user_id = @uid
+       UNION SELECT upper(currency), 'holdings' FROM holdings WHERE user_id = @uid
+       UNION SELECT upper(currency), 'transactions' FROM transactions WHERE user_id = @uid
+       ORDER BY 1, 2`,
+    )
+    .all({ uid }) as { currency: string; src: "accounts" | "holdings" | "transactions" }[];
+  const out = new Map<string, ("accounts" | "holdings" | "transactions")[]>();
+  for (const r of rows) out.set(r.currency, [...(out.get(r.currency) ?? []), r.src]);
+  return [...out].map(([currency, usedIn]) => ({ currency, usedIn }));
 }

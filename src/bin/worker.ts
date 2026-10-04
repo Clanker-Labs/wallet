@@ -54,7 +54,7 @@ wallet · Telegram setup
   1. In Telegram, talk to @BotFather → /newbot → copy the bot token.
   2. Add it to .env:   TELEGRAM_BOT_TOKEN=123456:ABC...
   3. Run the worker:   npm run worker
-  4. In the web app:   Settings → Telegram → "Connect" and send the /start CODE to your bot.
+  4. In the web app:   Settings → Telegram → "Generate link code", then send /start CODE to your bot.
 `;
 
 async function sendTest(api: TelegramApi, chatIds: number[]) {

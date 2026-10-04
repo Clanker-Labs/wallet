@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useState, useTransit
 import { useRouter } from "next/navigation";
 import { Check, ChevronLeft, ChevronRight, Loader2, Plus, RotateCw, Search, X, Zap } from "lucide-react";
 import { addMonths, formatDate, formatMonth, monthBounds } from "@/lib/dates";
+import { COMMON_CURRENCIES } from "@/lib/domain";
 import { Button, Card, Field, Input, Select } from "@/components/ui";
 import { Disclosure } from "@/components/accounts-ui";
 import {
@@ -23,6 +24,27 @@ export interface TxCategory {
 export interface TxAccount {
   id: number;
   name: string;
+  /** Account currency: new transactions default to it. */
+  currency?: string;
+}
+
+/** Currencies offered in pickers: the base, the user's account currencies, then the common ones. */
+export function currencyChoices(base: string, accounts: { currency?: string }[] = []): string[] {
+  const codes = [base, ...accounts.map((a) => a.currency).filter((c): c is string => !!c), ...COMMON_CURRENCIES];
+  return [...new Set(codes.map((c) => c.toUpperCase()))];
+}
+
+/** `<option>`s for a currency `<select>`. */
+export function CurrencyOptions({ codes }: { codes: string[] }) {
+  return (
+    <>
+      {codes.map((c) => (
+        <option key={c} value={c}>
+          {c}
+        </option>
+      ))}
+    </>
+  );
 }
 
 // ── Page-level context: categories (sent once), toasts, progress ─────────
@@ -260,11 +282,13 @@ export function QuickAdd({
   accounts,
   defaultAccountId,
   defaultOpen,
+  baseCurrency,
 }: {
   today: string;
   accounts: TxAccount[];
   defaultAccountId: number | null;
   defaultOpen: boolean;
+  baseCurrency: string;
 }) {
   const { categories, toast } = useTx();
   const [state, setState] = useState<TxActionState | null>(null);
@@ -272,6 +296,11 @@ export function QuickAdd({
   const [direction, setDirection] = useState<"out" | "in">("out");
   const [date, setDate] = useState(today);
   const [accountId, setAccountId] = useState(defaultAccountId ? String(defaultAccountId) : "");
+  // Follows the chosen account's currency until the user picks one explicitly.
+  const currencyFor = (id: string) => accounts.find((a) => String(a.id) === id)?.currency ?? baseCurrency;
+  const [currency, setCurrency] = useState(() => currencyFor(accountId));
+  const [currencyPicked, setCurrencyPicked] = useState(false);
+  const currencies = currencyChoices(baseCurrency, accounts);
   const [pending, start] = useTransition();
 
   return (
@@ -297,11 +326,13 @@ export function QuickAdd({
               if (res.ok) {
                 toast(res.message);
                 setDirection("out");
+                setCurrency(currencyFor(accountId));
+                setCurrencyPicked(false);
                 setKey((k) => k + 1);
               }
             });
           }}
-          className="grid items-end gap-3 pt-4 text-sm sm:grid-cols-2 lg:grid-cols-[8.75rem_minmax(8rem,1fr)_11.5rem_10.5rem_10rem_auto]"
+          className="grid items-end gap-3 pt-4 text-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_16.5rem] xl:grid-cols-[8.5rem_minmax(7rem,1fr)_16.5rem_9rem_9rem_auto]"
         >
           <Field label="Date">
             <Input type="date" name="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} required />
@@ -317,7 +348,7 @@ export function QuickAdd({
               data-autofocus
             />
           </Field>
-          <div>
+          <div className="sm:col-span-2 lg:col-span-1">
             <span className="mb-1 block text-xs font-medium text-ink-2">Amount</span>
             <div className="flex gap-1.5">
               <div role="radiogroup" aria-label="Direction" className="flex shrink-0 rounded-lg border border-border p-0.5">
@@ -330,7 +361,7 @@ export function QuickAdd({
                   <label
                     key={v}
                     className={clsx(
-                      "flex cursor-pointer items-center rounded-md px-2 text-xs font-medium has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent",
+                      "flex cursor-pointer items-center rounded-md px-1.5 text-xs font-medium whitespace-nowrap has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent",
                       direction === v ? "bg-surface-2 text-ink" : "text-muted hover:text-ink",
                     )}
                   >
@@ -347,6 +378,19 @@ export function QuickAdd({
                 ))}
               </div>
               <Input name="amount" inputMode="decimal" required placeholder="12,50" autoComplete="off" className="min-w-0" />
+              <select
+                name="currency"
+                aria-label="Currency"
+                title="Currency of this amount"
+                value={currency}
+                onChange={(e) => {
+                  setCurrency(e.target.value);
+                  setCurrencyPicked(true);
+                }}
+                className="h-9 w-[4.75rem] shrink-0 rounded-lg border border-border bg-surface pr-1 pl-2 text-sm text-ink focus:border-accent focus:outline-none"
+              >
+                <CurrencyOptions codes={currencies} />
+              </select>
             </div>
           </div>
           <Field label="Category">
@@ -357,11 +401,19 @@ export function QuickAdd({
             </Select>
           </Field>
           <Field label="Account">
-            <Select name="accountId" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            <Select
+              name="accountId"
+              value={accountId}
+              onChange={(e) => {
+                setAccountId(e.target.value);
+                if (!currencyPicked) setCurrency(currencyFor(e.target.value));
+              }}
+            >
               <option value="">— None —</option>
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
+                  {a.currency && a.currency !== baseCurrency ? ` · ${a.currency}` : ""}
                 </option>
               ))}
             </Select>

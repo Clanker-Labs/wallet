@@ -9,6 +9,7 @@ import { formatDate } from "@/lib/dates";
 import { Button, ButtonLink, Card, CardHeader, Field, Select, Stat, Textarea } from "@/components/ui";
 import { useFormat } from "@/components/format";
 import { Disclosure } from "@/components/accounts-ui";
+import { CurrencyOptions, currencyChoices } from "@/components/transactions-ui";
 import { importCsvAction, type ImportResult } from "@/app/transactions/import/actions";
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -66,15 +67,22 @@ function Steps({ step }: { step: Step }) {
 export function ImportWizard({
   accounts,
   defaultAccountId,
+  baseCurrency,
 }: {
-  accounts: { id: number; name: string }[];
+  accounts: { id: number; name: string; currency: string }[];
   defaultAccountId: number | null;
+  baseCurrency: string;
 }) {
   const f = useFormat();
   const [step, setStep] = useState<Step>("file");
   const [file, setFile] = useState<Loaded | null>(null);
   const [mapping, setMapping] = useState<CsvMapping | null>(null);
   const [accountId, setAccountId] = useState(defaultAccountId ? String(defaultAccountId) : "");
+  // Amounts are in the target account's currency unless the user says otherwise.
+  const currencyFor = (id: string) => accounts.find((a) => String(a.id) === id)?.currency ?? baseCurrency;
+  const [currency, setCurrency] = useState(() => currencyFor(accountId));
+  const [currencyPicked, setCurrencyPicked] = useState(false);
+  const currencies = currencyChoices(baseCurrency, accounts);
   const [error, setError] = useState<string | null>(null);
   const [paste, setPaste] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -122,6 +130,7 @@ export function ImportWizard({
       fd.set("encoding", encoding);
       fd.set("mapping", JSON.stringify(mapping));
       fd.set("accountId", accountId);
+      fd.set("currency", currency);
       try {
         const res = await importCsvAction(fd);
         if (!res.ok) return setError(res.error);
@@ -286,7 +295,7 @@ export function ImportWizard({
             </Button>
           }
         />
-        <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-[repeat(4,minmax(0,1fr))_6.5rem]">
           <Field label="Date column">{columnSelect("date")}</Field>
           <Field label="Description column">{columnSelect("description")}</Field>
           <Field label="Date format">
@@ -301,13 +310,31 @@ export function ImportWizard({
             </Select>
           </Field>
           <Field label="Into account">
-            <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            <Select
+              value={accountId}
+              onChange={(e) => {
+                setAccountId(e.target.value);
+                if (!currencyPicked) setCurrency(currencyFor(e.target.value));
+              }}
+            >
               <option value="">— No account —</option>
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
+                  {a.currency !== baseCurrency ? ` · ${a.currency}` : ""}
                 </option>
               ))}
+            </Select>
+          </Field>
+          <Field label="Currency">
+            <Select
+              value={currency}
+              onChange={(e) => {
+                setCurrency(e.target.value);
+                setCurrencyPicked(true);
+              }}
+            >
+              <CurrencyOptions codes={currencies} />
             </Select>
           </Field>
         </div>
@@ -413,7 +440,7 @@ export function ImportWizard({
                         r.amount > 0 ? "text-good-text" : "text-ink",
                       )}
                     >
-                      {f.units(r.amount, { signed: true })}
+                      {f.units(r.amount, { signed: true, currency })}
                     </td>
                   </tr>
                 ))}

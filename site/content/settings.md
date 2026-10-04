@@ -47,7 +47,7 @@ Under it, ready-to-copy snippets with this server's real paths and URL: Claude C
 
 ## Members (owner only)
 
-Everyone with an account on this server, with their role, join date, passkey count and whether Telegram is linked, and whether sign-ups are open (`WALLET_ALLOW_SIGNUP`). See [Sign-up](signup.html).
+Everyone with an account on this server, with their role, join date, passkey count and whether Telegram is linked, and whether sign-ups are open (they are unless `WALLET_ALLOW_SIGNUP=0`). See [Sign-up](signup.html).
 
 ## Your data
 

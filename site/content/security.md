@@ -98,7 +98,7 @@ One install can host several people, each with a private wallet:
 ## Sign-up policy
 
 - The **first** account can always be created; it becomes the **owner**.
-- After that, `/signup` is closed unless `WALLET_ALLOW_SIGNUP` is `1`, `true`, `yes` or `on`. The registration endpoint enforces the same rule (403 *Sign-ups are closed*), not just the page.
+- After that, anyone can create their own account, unless `WALLET_ALLOW_SIGNUP` is `0`, `false`, `no` or `off`. When closed, the registration endpoint enforces it too (403 *Sign-ups are closed*), not just the page. Close sign-ups on an internet-facing install: accounts can't see each other's data, but each can use the assistant (and your API key).
 - Members get the same features and fully separate data. The owner also sees the member list in **Settings → Members**, and is the user that token-less API calls, the stdio MCP server and `TELEGRAM_CHAT_ID` chats act as unless `WALLET_USER_ID` says otherwise.
 
 ## Data at rest

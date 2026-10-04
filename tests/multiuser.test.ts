@@ -159,6 +159,17 @@ describe("exchange rates", () => {
     ]);
   });
 
+  it("tells tool callers which currency amounts are in", async () => {
+    setSetting(uid, "currency", "EUR");
+    const ctx = { userId: uid };
+    const spending = JSON.parse((await callTool(ctx, "get_spending_by_category", {})).content);
+    expect(spending).toMatchObject({ baseCurrency: "EUR", items: expect.any(Array) });
+    expect(JSON.parse((await callTool(ctx, "get_overview", {})).content).baseCurrency).toBe("EUR");
+    expect(JSON.parse((await callTool(ctx, "get_net_worth", {})).content).currency).toBe("EUR"); // already labelled
+    const sim = JSON.parse((await callTool(ctx, "borrowing_capacity", { monthlyNetIncome: 5000 })).content);
+    expect(sim).not.toHaveProperty("baseCurrency"); // calculators work in whatever unit they're given
+  });
+
   it("flags currencies without a rate instead of mixing them", () => {
     createAccount(uid, { name: "Swiss", type: "savings", currency: "CHF", initialBalance: 500 });
     const nw = netWorthOn(uid);
@@ -353,9 +364,12 @@ describe("token-less local API access", async () => {
     delete process.env.WALLET_ALLOWED_HOSTS;
   });
 
-  it("only lets the first account sign up unless enabled", () => {
+  it("keeps sign-ups open unless turned off (the first account always can)", () => {
     expect(signupAllowed(0)).toBe(true);
+    expect(signupAllowed(5)).toBe(true);
+    process.env.WALLET_ALLOW_SIGNUP = "0";
     expect(signupAllowed(1)).toBe(false);
+    expect(signupAllowed(0)).toBe(true);
     process.env.WALLET_ALLOW_SIGNUP = "1";
     expect(signupAllowed(1)).toBe(true);
     delete process.env.WALLET_ALLOW_SIGNUP;

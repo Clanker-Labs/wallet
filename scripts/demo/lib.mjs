@@ -144,12 +144,12 @@ const OVERLAY_SCRIPT = String.raw`(() => {
     .__demo-ripple { position: fixed; z-index: 2147483646; pointer-events: none; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%;
       background: rgba(91,79,233,.35); border: 2px solid rgba(91,79,233,.8); animation: __demo-ripple .55s ease-out forwards; }
     @keyframes __demo-ripple { from { transform: scale(.3); opacity: 1 } to { transform: scale(1.6); opacity: 0 } }
-    #__demo-caption { position: fixed; left: 50%; bottom: 34px; z-index: 2147483645; pointer-events: none; max-width: min(78vw, 980px);
-      transform: translate(-50%, 12px); opacity: 0; transition: opacity .35s ease, transform .35s ease;
+    #__demo-caption { position: fixed; left: 0; right: 0; margin: 0 auto; width: fit-content; bottom: 34px; z-index: 2147483645; pointer-events: none; max-width: min(78vw, 980px);
+      transform: translateY(12px); opacity: 0; transition: opacity .35s ease, transform .35s ease;
       font: 600 21px/1.35 "Inter Demo", system-ui, sans-serif; letter-spacing: -.01em; color: #fff; text-align: center;
       padding: 13px 24px; border-radius: 16px; background: rgba(11,18,32,.84); backdrop-filter: blur(8px);
       box-shadow: 0 10px 30px rgba(0,0,0,.25), inset 0 0 0 1px rgba(255,255,255,.08); }
-    #__demo-caption.on { opacity: 1; transform: translate(-50%, 0); }
+    #__demo-caption.on { opacity: 1; transform: none; }
     #__demo-caption b { color: #f5c451; font-weight: 700; }
     #__demo-badge { position: fixed; right: 22px; top: 18px; z-index: 2147483645; pointer-events: none; opacity: 0; transition: opacity .25s;
       font: 700 15px/1 "Inter Demo", system-ui, sans-serif; color: #fff; padding: 9px 13px; border-radius: 999px;

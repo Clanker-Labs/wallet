@@ -24,10 +24,10 @@ export function validBearer(header: string | null): boolean {
   return !!m && safeEqual(m[1].trim(), process.env.WALLET_API_TOKEN!);
 }
 
-/** The first account can always be created; more only when WALLET_ALLOW_SIGNUP=1. */
+/** Anyone can create an account unless WALLET_ALLOW_SIGNUP=0 (the first account always can). */
 export function signupAllowed(existingUsers: number): boolean {
   if (existingUsers === 0) return true;
-  return /^(1|true|yes|on)$/i.test(process.env.WALLET_ALLOW_SIGNUP ?? "");
+  return !/^(0|false|no|off)$/i.test((process.env.WALLET_ALLOW_SIGNUP ?? "").trim());
 }
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);

@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Terminal replay</title>
+<style>
+  @font-face { font-family: "Inter"; src: url("/__demo/inter-latin.woff2") format("woff2"); font-weight: 100 900; }
+  :root {
+    --page: #f5f6fa;
+    --term: #16161e;
+    --fg: #c9cdd8;
+    --bright: #f3f4f8;
+    --dim: #737a8c;
+    --green: #4ec98a;
+    --orange: #d9825b;   /* Claude Code's accent */
+    --blue: #7aa2f7;
+    --yellow: #e0c27a;
+    --line: 1.46;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: var(--page); font-family: Inter, system-ui, sans-serif; }
+  .backdrop {
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(560px 420px at 15% 20%, rgba(91, 79, 233, .16), transparent 70%),
+      radial-gradient(600px 460px at 88% 80%, rgba(139, 92, 246, .13), transparent 70%),
+      var(--page);
+  }
+  .window {
+    position: fixed; left: 50%; top: 16px; width: 1160px; height: 600px; transform: translateX(-50%);
+    border-radius: 12px; overflow: hidden; background: var(--term);
+    box-shadow: 0 30px 80px rgba(30, 27, 75, .30), 0 8px 22px rgba(30, 27, 75, .18), 0 0 0 1px rgba(255,255,255,.06) inset;
+    display: flex; flex-direction: column;
+  }
+  .titlebar { flex: none; height: 36px; display: flex; align-items: center; padding: 0 14px; background: #20212b; border-bottom: 1px solid #0d0d12; position: relative; }
+  .lights { display: flex; gap: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .lights i:nth-child(1) { background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+  .title { position: absolute; left: 0; right: 0; text-align: center; font: 500 13px/36px Inter, system-ui, sans-serif; color: #9aa0b2; pointer-events: none; }
+  .screen {
+    flex: 1; overflow: hidden; padding: 12px 18px 14px; position: relative;
+    font-family: "DejaVu Sans Mono", "Liberation Mono", monospace; font-size: 14px; line-height: var(--line); color: var(--fg);
+  }
+  .scroll { position: absolute; left: 18px; right: 18px; top: 12px; bottom: 14px; overflow: hidden; }
+  .content { position: relative; }
+  .l { white-space: pre-wrap; overflow-wrap: anywhere; min-height: calc(1em * var(--line)); }
+  .hang { padding-left: 4ch; text-indent: -2ch; }
+  .hang2 { padding-left: 2ch; }
+  .b { color: var(--bright); font-weight: 700; }
+  .dim { color: var(--dim); }
+  .ok { color: var(--green); }
+  .acc { color: var(--orange); }
+  .blue { color: var(--blue); }
+  .code { color: var(--yellow); }
+  .prompt { color: var(--green); font-weight: 700; }
+  .cursor { display: inline-block; width: .6em; height: 1.15em; vertical-align: -0.2em; background: var(--fg); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .dot { color: var(--bright); }
+  .dot.tool { color: var(--green); }
+  .dot.run { animation: pulse .9s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .elbow { font-family: "FreeMono", "DejaVu Sans Mono", monospace; color: var(--dim); }
+  .box { border: 1px solid var(--orange); border-radius: 6px; padding: 6px 12px; margin: 4px 0 8px; width: max-content; max-width: 100%; }
+  .input { border: 1px solid #4b5063; border-radius: 6px; padding: 5px 10px; margin: 6px 0 2px; }
+  .hint { margin-top: 2px; }
+  .spin { color: var(--orange); }
+  .table { color: var(--fg); line-height: 1.2; min-height: 0; }
+</style>
+</head>
+<body>
+<div class="backdrop"></div>
+<div class="window">
+  <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="title" id="title">alex — zsh — 120×28</div></div>
+  <div class="screen"><div class="scroll" id="scroll"><div class="content" id="content"></div></div></div>
+</div>
+<script>
+(() => {
+  const content = document.getElementById("content");
+  const scroll = document.getElementById("scroll");
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let follow = true;
+
+  function keepBottom(smooth = false) {
+    if (!follow) return;
+    const target = Math.max(0, content.offsetHeight - scroll.clientHeight);
+    content.style.transition = smooth ? "transform .25s ease-out" : "none";
+    content.style.transform = `translateY(${-target}px)`;
+  }
+  function scrollTo(y, ms) {
+    content.style.transition = `transform ${ms}ms cubic-bezier(.4,0,.2,1)`;
+    const max = Math.max(0, content.offsetHeight - scroll.clientHeight);
+    content.style.transform = `translateY(${-Math.min(max, Math.max(0, y))}px)`;
+    return sleep(ms);
+  }
+
+  function line(html = "", cls = "") {
+    const d = document.createElement("div");
+    d.className = "l " + cls;
+    d.innerHTML = html || "";
+    content.append(d);
+    keepBottom();
+    return d;
+  }
+
+  // ── Markdown (as Claude Code prints it in a terminal) ─────────────────
+  const inline = (s) =>
+    esc(s)
+      .replace(/\*\*(.+?)\*\*/g, '<span class="b">$1</span>')
+      .replace(/`([^`]+)`/g, '<span class="code">$1</span>');
+  const plain = (s) => s.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1");
+  const width = (s) => [...plain(s)].length;
+
+  function tableLines(rows) {
+    const cells = rows.filter((r) => !/^\|\s*:?-+/.test(r)).map((r) => r.replace(/^\||\|$/g, "").split("|").map((c) => c.trim()));
+    const n = Math.max(...cells.map((r) => r.length));
+    const w = Array.from({ length: n }, (_, i) => Math.max(...cells.map((r) => width(r[i] ?? ""))));
+    const rule = (l, m, r) => l + w.map((x) => "─".repeat(x + 2)).join(m) + r;
+    const row = (r, head) =>
+      "│" + w.map((x, i) => {
+        const c = r[i] ?? "";
+        const pad = " ".repeat(x - width(c));
+        const right = !head && /^[-+$€£]?[\d$€£.,%\s+-]+$/.test(plain(c)) && /\d/.test(c);
+        const txt = head ? `<span class="b">${esc(plain(c))}</span>` : inline(c);
+        return " " + (right ? pad + txt : txt + pad) + " ";
+      }).join("│") + "│";
+    return [
+      rule("┌", "┬", "┐"),
+      row(cells[0], true),
+      rule("├", "┼", "┤"),
+      ...cells.slice(1).map((r) => row(r, false)),
+      rule("└", "┴", "┘"),
+    ];
+  }
+
+  /** Markdown → list of [html, cls] terminal lines. */
+  function markdown(md) {
+    const out = [];
+    const src = md.replace(/\r/g, "").split("\n");
+    for (let i = 0; i < src.length; i++) {
+      const s = src[i];
+      if (/^\s*\|/.test(s)) {
+        const rows = [];
+        while (i < src.length && /^\s*\|/.test(src[i])) rows.push(src[i++].trim());
+        i--;
+        for (const t of tableLines(rows)) out.push([t, "table hang2"]);
+        continue;
+      }
+      const h = s.match(/^#{1,6}\s+(.*)$/);
+      if (h) { out.push([`<span class="b">${inline(h[1])}</span>`, "hang2"]); continue; }
+      const li = s.match(/^(\s*)[-*]\s+(.*)$/);
+      if (li) { out.push([`${" ".repeat(li[1].length)}• ${inline(li[2])}`, "hang"]); continue; }
+      const ol = s.match(/^(\s*)(\d+)\.\s+(.*)$/);
+      if (ol) { out.push([`${ol[2]}. ${inline(ol[3])}`, "hang"]); continue; }
+      out.push([inline(s), "hang2"]);
+    }
+    return out;
+  }
+
+  const fmtArgs = (input) => {
+    const parts = Object.entries(input ?? {}).map(([k, v]) => `${k}: ${JSON.stringify(v)}`);
+    return parts.length ? `(${parts.join(", ")})` : "";
+  };
+  const toolName = (name) => {
+    const m = name.match(/^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/);
+    return m ? `${m[1]} - ${m[2]} (MCP)` : name;
+  };
+
+  let spinnerTimer = null;
+  const tools = new Map();
+
+  window.term = {
+    setTitle(t) { document.getElementById("title").textContent = t; },
+    /** Shell prompt with a typed command. */
+    async shell(cmd, perChar = 32) {
+      const l = line('<span class="prompt">➜</span>  <span class="blue">~</span> <span class="cur"></span><span class="cursor"></span>');
+      const cur = l.querySelector(".cur");
+      for (const ch of cmd) { cur.textContent += ch; await sleep(perChar); }
+      await sleep(250);
+      l.querySelector(".cursor").remove();
+    },
+    out(text, cls = "") { for (const t of text.split("\n")) line(esc(t), cls); },
+    blank() { line(""); },
+    /** Claude Code's start banner. */
+    banner({ cwd = "~", tools = 0 }) {
+      const d = document.createElement("div");
+      d.className = "box";
+      d.innerHTML =
+        `<div class="l"><span class="acc">✻</span> Welcome to <span class="b">Claude Code</span></div>` +
+        `<div class="l dim">  /help for help, /status for your current setup</div>` +
+        `<div class="l dim">  cwd: ${esc(cwd)}</div>` +
+        (tools ? `<div class="l dim">  MCP: <span class="ok">wallet</span> connected · ${tools} tools</div>` : "");
+      content.append(d);
+      keepBottom();
+    },
+    /** The input box; types the prompt, then echoes it like Claude Code does. */
+    async ask(text, perChar = 26) {
+      const box = document.createElement("div");
+      box.className = "input";
+      box.innerHTML = '<div class="l"><span class="dim">&gt;</span> <span class="cur"></span><span class="cursor"></span></div>';
+      content.append(box);
+      const hint = line('<span class="dim">  ? for shortcuts</span>', "hint");
+      keepBottom();
+      const cur = box.querySelector(".cur");
+      for (const ch of text) { cur.textContent += ch; keepBottom(); await sleep(perChar); }
+      await sleep(350);
+      box.remove();
+      hint.remove();
+      line(`<span class="dim">&gt; ${esc(text)}</span>`, "hang2");
+      line("");
+    },
+    toolStart(ev) {
+      const l = line(`<span class="dot tool run">●</span> <span class="b">${esc(toolName(ev.name))}</span><span class="dim">${esc(fmtArgs(ev.input))}</span>`, "hang");
+      tools.set(ev.id, l);
+    },
+    toolEnd(ev) {
+      const l = tools.get(ev.id);
+      if (l) l.querySelector(".dot").classList.remove("run");
+      if (ev.error) l?.querySelector(".dot").setAttribute("style", "color:#f7768e");
+      const first = (ev.content || "").replace(/\s+/g, " ").trim();
+      const shown = first.length > 96 ? first.slice(0, 96) + "…" : first;
+      const r = document.createElement("div");
+      r.className = "l";
+      r.innerHTML = `  <span class="elbow">⎿</span>  <span class="dim">${esc(shown)}</span>`;
+      l ? l.after(r) : content.append(r);
+      keepBottom();
+    },
+    spinner(on, label = "Thinking") {
+      clearInterval(spinnerTimer);
+      document.getElementById("spin")?.remove();
+      if (!on) return;
+      const frames = ["✻", "✽", "✶", "✳", "✢", "·"];
+      let i = 0;
+      const t0 = Date.now();
+      const l = line("", "");
+      l.id = "spin";
+      const draw = () => {
+        const s = Math.floor((Date.now() - t0) / 1000);
+        l.innerHTML = `<span class="spin">${frames[i++ % frames.length]}</span> <span class="acc">${label}…</span> <span class="dim">(${s}s · esc to interrupt)</span>`;
+      };
+      draw();
+      spinnerTimer = setInterval(draw, 160);
+    },
+    /** Print an answer progressively; returns the y offset where it starts. */
+    async answer(md, perLine = 45) {
+      const lines = markdown(md.trim());
+      const first = line(`<span class="dot">●</span> ${lines[0][0]}`, "hang2");
+      first.style.textIndent = "-2ch";
+      const top = first.offsetTop;
+      for (const [html, cls] of lines.slice(1)) {
+        line(html, cls);
+        await sleep(perLine);
+      }
+      return top;
+    },
+    stopFollowing() { follow = false; },
+    follow() { follow = true; keepBottom(true); },
+    scrollTo,
+    contentHeight: () => content.offsetHeight,
+    viewHeight: () => scroll.clientHeight,
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,184 @@
+{
+  "bot": "Wallet",
+  "username": "alex_wallet_bot",
+  "canned": false,
+  "events": [
+    {
+      "type": "date",
+      "label": "October 1"
+    },
+    {
+      "type": "bot",
+      "id": 900,
+      "html": "🔔 <b>Update your balances</b>\nGrab the numbers from your banking apps — one reply per account.\n\n🕰️ Not updated for a while:\n• Car (Zoe) — 31 Jul 2026\n• Apartment Lyon 7e — 30 Apr 2026\n👉 Tap <b>Update balances now</b> or send /update to go through them one by one.",
+      "keyboard": [
+        [
+          {
+            "text": "✏️ Update balances now",
+            "callback_data": "walk:start"
+          }
+        ],
+        [
+          {
+            "text": "✅ Done",
+            "callback_data": "done:1"
+          },
+          {
+            "text": "⏰ Snooze 3h",
+            "callback_data": "snooze:1:3"
+          },
+          {
+            "text": "💤 Tomorrow",
+            "callback_data": "snooze:1:24"
+          }
+        ]
+      ],
+      "time": "09:00"
+    },
+    {
+      "type": "date",
+      "label": "October 2"
+    },
+    {
+      "type": "bot",
+      "id": 901,
+      "html": "🔁 Still pending: <b>Update your balances</b>\nGrab the numbers from your banking apps — one reply per account.\n\n🕰️ Not updated for a while:\n• Car (Zoe) — 31 Jul 2026\n• Apartment Lyon 7e — 30 Apr 2026\n👉 Tap <b>Update balances now</b> or send /update to go through them one by one.",
+      "keyboard": [
+        [
+          {
+            "text": "✏️ Update balances now",
+            "callback_data": "walk:start"
+          }
+        ],
+        [
+          {
+            "text": "✅ Done",
+            "callback_data": "done:1"
+          },
+          {
+            "text": "⏰ Snooze 3h",
+            "callback_data": "snooze:1:3"
+          },
+          {
+            "text": "💤 Tomorrow",
+            "callback_data": "snooze:1:24"
+          }
+        ]
+      ],
+      "time": "09:00"
+    },
+    {
+      "type": "tap",
+      "message": 901,
+      "button": "✏️ Update balances now"
+    },
+    {
+      "type": "toast",
+      "text": "✏️ Let's go"
+    },
+    {
+      "type": "bot",
+      "id": 902,
+      "html": "🔁 Let's update 5 accounts, stalest first.\n\n✏️ <b>1/5 · Apartment Lyon 7e</b>\nLast: €349,298.00 · 30 Apr 2026\nReply with the new balance, <i>skip</i> or <i>stop</i>.",
+      "time": "09:02"
+    },
+    {
+      "type": "user",
+      "id": 903,
+      "text": "352 000",
+      "time": "09:02"
+    },
+    {
+      "type": "bot",
+      "id": 904,
+      "html": "👍 €352,000.00 (+€2,702.00)\n\n✏️ <b>2/5 · Car (Zoe)</b>\nLast: €10,122.00 · 31 Jul 2026\nReply with the new balance, <i>skip</i> or <i>stop</i>.",
+      "time": "09:02"
+    },
+    {
+      "type": "user",
+      "id": 905,
+      "text": "11 200",
+      "time": "09:03"
+    },
+    {
+      "type": "bot",
+      "id": 906,
+      "html": "👍 €11,200.00 (+€1,078.00)\n\n✏️ <b>3/5 · Chase Checking</b> (Chase)\nLast: $1,879.06 · 30 Sep 2026\nReply with the new balance, <i>skip</i> or <i>stop</i>.",
+      "time": "09:03"
+    },
+    {
+      "type": "user",
+      "id": 907,
+      "text": "stop",
+      "time": "09:03"
+    },
+    {
+      "type": "bot",
+      "id": 908,
+      "html": "✅ Done — 2 updated, 0 skipped.\n🏦 Net worth: <b>$301,826.40</b> (+$2,668.38)",
+      "time": "09:03"
+    },
+    {
+      "type": "user",
+      "id": 909,
+      "text": "/networth",
+      "time": "12:41"
+    },
+    {
+      "type": "bot",
+      "id": 910,
+      "html": "🏦 <b>Net worth: $301,826</b>\n➕ Assets: $435,224\n➖ Liabilities: $133,397\n\n🏠 Real estate: $193,344 · 44%\n📈 Investments: $84,755 · 19%\n🏖️ Retirement: $66,982 · 15%\n🪙 Crypto: $34,943 · 8%\n💵 Cash &amp; savings: $29,960 · 7%\n🥇 Commodities: $12,936 · 3%\n📦 Other assets: $12,304 · 3%\n\n📈 1 month: +$7,792 (+2.6%)\n📈 YTD: +$36,614 (+13.8%)",
+      "time": "12:41"
+    },
+    {
+      "type": "user",
+      "id": 911,
+      "text": "/spent 12.50 groceries — lunch",
+      "time": "12:42"
+    },
+    {
+      "type": "bot",
+      "id": 912,
+      "html": "💸 Spent <b>$12.50</b> · 🛒 Groceries\n📝 lunch\n🟢 $44 / $500 this month (9%)",
+      "time": "12:42"
+    },
+    {
+      "type": "user",
+      "id": 913,
+      "text": "/budget",
+      "time": "12:42"
+    },
+    {
+      "type": "bot",
+      "id": 914,
+      "html": "🧾 <b>Budget · Oct 2026</b> · 13% of month gone\n💰 Income: $0\n💸 Expenses: $208\n🐖 Savings rate: —\n\n🟢 🚇 <b>Transport</b>\n▓▓▓▓▓▓▓▓ 95% · $95 / $100\n🟢 🛒 <b>Groceries</b>\n▓░░░░░░░ 9% · $44 / $500\n🟢 🔁 <b>Subscriptions</b>\n▓░░░░░░░ 7% · $4 / $60\n🟢 🍽️ <b>Restaurants &amp; bars</b>\n░░░░░░░░ 0% · $0 / $280\n🟢 🛍️ <b>Shopping</b>\n░░░░░░░░ 0% · $0 / $220\n🟢 🎟️ <b>Leisure</b>\n░░░░░░░░ 0% · $0 / $130\n🟢 ✈️ <b>Travel</b>\n░░░░░░░░ 0% · $0 / $280\n🟢 💡 <b>Utilities &amp; internet</b>\n░░░░░░░░ 0% · $0 / $120\n🟢 🩺 <b>Health</b>\n░░░░░░░░ 0% · $0 / $70\n\n⚪ Unbudgeted: Insurance $34, Uncategorized $31",
+      "time": "12:42"
+    },
+    {
+      "type": "user",
+      "id": 915,
+      "file": {
+        "name": "boursobank-octobre.csv",
+        "size": 361
+      },
+      "caption": "compte courant",
+      "time": "18:15"
+    },
+    {
+      "type": "bot",
+      "id": 916,
+      "html": "📥 Got <b>boursobank-octobre.csv</b> — reading it…",
+      "time": "18:15"
+    },
+    {
+      "type": "typing",
+      "ms": 18758
+    },
+    {
+      "type": "bot",
+      "id": 917,
+      "html": "✅ Imported 8 transactions into Compte courant (BoursoBank, EUR), 0 duplicates.\n\nPeriod: Oct 1–3, 2026.\nSpending: €142.64. Income: +€32.00 (Lucas Martin's dinner repayment).\n\nCategories:\n🛒 Groceries: Franprix, Boulangerie Paul\n🚇 Transport: Vélo'v\n🍽️ Restaurants: La Boîte à Café, Halles Paul Bocuse\n🛍️ Shopping: Decathlon\n🎟️ Leisure: Cinéma Comœdia\n↩️ Refunds: Lucas Martin transfer\n\nI added rules for franprix, boulangerie, velov, decathlon and cinema, so future imports categorize automatically.\n\n⚠️ The CSV has no balance column. The account balance still shows €2,611.97 as of Sep 30. Send me the current balance from the app and I'll record it.\n\nOne older transaction, CB PRAIRIAL (€28.10, Oct 2), is still uncategorized. Groceries?",
+      "time": "18:15"
+    }
+  ]
+}

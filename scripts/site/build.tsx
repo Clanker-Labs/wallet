@@ -180,7 +180,7 @@ const ENV_DEFAULTS: Record<string, string> = {
   WALLET_LOCALE: "en-US",
   WALLET_TIMEZONE: "the system time zone",
   WALLET_PUBLIC_URL: "derived from the request",
-  WALLET_ALLOW_SIGNUP: "off",
+  WALLET_ALLOW_SIGNUP: "on (sign-ups open)",
   WALLET_RP_ID: "the host of WALLET_PUBLIC_URL",
   WALLET_USER_ID: "the owner",
   WALLET_AGENT_PROVIDER: "anthropic",

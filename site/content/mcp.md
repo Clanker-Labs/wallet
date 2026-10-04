@@ -55,7 +55,8 @@ Without a token, only requests to a local hostname that don't come from another 
 ## What clients see
 
 - All enabled tools, with their titles, descriptions, JSON Schemas and a `readOnlyHint` annotation. With `WALLET_AGENT_READONLY=1`, write tools don't exist.
-- Server instructions: start with `get_overview`; amounts in results are in currency units and totals in your base currency.
+- Server instructions: start with `get_overview`; amounts in results are in currency units and totals in your base currency, which the instructions name (e.g. `USD`).
+- Every result says its currency: `currency` on results that already carry one, otherwise a `baseCurrency` field (lists come back as `{ baseCurrency, items }`). Rows with their own `currency` (accounts, holdings, transactions) are in that currency.
 - A `wallet_assistant` prompt with the same persona and house rules as the built-in assistant.
 
 ## REST

@@ -56,8 +56,23 @@ The monthly routine the app is built around:
 
 ```bash
 cp .env.example .env   # WALLET_PUBLIC_URL, Telegram, ANTHROPIC_API_KEY… and WALLET_API_TOKEN if reachable from a network
-docker compose up -d   # web on :3000 + Telegram worker, sharing a `wallet-data` volume
+docker compose up -d   # web on 127.0.0.1:3000, database on the `wallet-data` volume
 ```
+
+The web port is published on **loopback**, not `0.0.0.0`. Passkeys need https or
+localhost anyway, so put a tailnet, a tunnel or an HTTPS proxy in front of it
+rather than exposing the port.
+
+Two optional knobs:
+
+| | |
+|---|---|
+| `WALLET_PORT` | Host port for the web app (default `3000`). |
+| `WALLET_DATA` | Host path for the database. Unset uses the named volume; set it to bind a directory instead — do that when something on the host backs you up, because a named volume lives under `/var/lib/docker` where a backup sweeping your app directories will not find it. The container runs as uid 1000, which owns the files it creates there. |
+
+Telegram is **opt-in**: `docker compose --profile telegram up -d` adds the worker.
+It is out of the default stack because it exits when `TELEGRAM_BOT_TOKEN` is
+unset, which under a restart policy is a crash loop rather than a clear error.
 
 Without Docker, run `npm run build && npm start` for the web app and `npm run worker` for Telegram, prices and FX. Keep both running, e.g. with systemd or pm2.
 

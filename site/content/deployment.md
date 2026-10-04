@@ -105,7 +105,7 @@ Then set in `.env`:
 | `WALLET_PUBLIC_URL=https://wallet.example.com` | The passkey origin and RP id (instead of trusting forwarded headers), the link printed by `npm run auth:link`, links in Telegram messages, and `Secure` session cookies. |
 | `WALLET_API_TOKEN=<openssl rand -hex 32>` | **Required once the port is reachable from a network.** Token-less access already refuses forwarded public hostnames, but a token is what protects `/api/*` and `/api/mcp` from anyone who can reach the port. |
 | `WALLET_RP_ID` | Only if passkeys should be scoped to a parent domain (e.g. `example.com`). Decide before people register: passkeys are bound to it. |
-| `WALLET_ALLOW_SIGNUP=1` | Only while family members create their accounts. |
+| `WALLET_ALLOW_SIGNUP=0` | Once everyone has an account, so strangers who reach the site can't create one (and use your assistant). |
 
 Compose already binds the app to `127.0.0.1`, so the proxy must run on the same host (or reach it through a tunnel or tailnet). Without Docker, bind it to localhost too: `npm start -- -H 127.0.0.1`. Sub-path hosting (`example.com/wallet`) isn't supported; use a subdomain.
 

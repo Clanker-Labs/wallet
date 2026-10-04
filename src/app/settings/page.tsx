@@ -487,13 +487,13 @@ export default async function SettingsPage() {
             <span>
               {signupsOpen ? (
                 <>
-                  <Code>WALLET_ALLOW_SIGNUP</Code> is on: anyone who can reach this address can create their own wallet at{" "}
-                  <Code>{`${origin}/signup`}</Code>. Remove it to close sign-ups.
+                  Sign-ups are open: anyone who can reach this address can create their own wallet at{" "}
+                  <Code>{`${origin}/signup`}</Code>. Set <Code>WALLET_ALLOW_SIGNUP=0</Code> and restart to close them.
                 </>
               ) : (
                 <>
-                  Only existing members can sign in. To let someone create their own wallet at <Code>/signup</Code>, set{" "}
-                  <Code>WALLET_ALLOW_SIGNUP=1</Code> and restart.
+                  Sign-ups are closed (<Code>WALLET_ALLOW_SIGNUP=0</Code>): only existing members can sign in. Remove it
+                  and restart to let people create their own wallet at <Code>/signup</Code>.
                 </>
               )}
             </span>

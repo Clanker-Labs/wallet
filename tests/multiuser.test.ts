@@ -364,9 +364,12 @@ describe("token-less local API access", async () => {
     delete process.env.WALLET_ALLOWED_HOSTS;
   });
 
-  it("only lets the first account sign up unless enabled", () => {
+  it("keeps sign-ups open unless turned off (the first account always can)", () => {
     expect(signupAllowed(0)).toBe(true);
+    expect(signupAllowed(5)).toBe(true);
+    process.env.WALLET_ALLOW_SIGNUP = "0";
     expect(signupAllowed(1)).toBe(false);
+    expect(signupAllowed(0)).toBe(true);
     process.env.WALLET_ALLOW_SIGNUP = "1";
     expect(signupAllowed(1)).toBe(true);
     delete process.env.WALLET_ALLOW_SIGNUP;

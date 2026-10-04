@@ -23,13 +23,15 @@ You're signed in right away (a 90-day session) and land on the dashboard's welco
 
 ## More people
 
-After the owner exists, sign-ups are **closed**: `/signup` says so, and the registration API refuses with 403. To let someone create their own wallet:
+Sign-ups are **open**: anyone else opens `/signup` and goes through the same passkey step. Each member has a completely separate wallet: accounts, transactions, budgets, reminders, assistant conversations, Telegram chat. The owner sees everyone under **Settings → Members**.
+
+To close sign-ups once everyone's in (recommended when the app is reachable from the internet: each account can use your assistant, and its API costs):
 
 ```bash
-WALLET_ALLOW_SIGNUP=1    # in .env, then restart; also accepts true, yes, on
+WALLET_ALLOW_SIGNUP=0    # in .env, then restart; also accepts false, no, off
 ```
 
-They open `/signup` (the page now reads **Create your account**) and go through the same passkey step. Each member has a completely separate wallet: accounts, transactions, budgets, reminders, assistant conversations, Telegram chat. The owner sees everyone under **Settings → Members**. Remove the variable again to close sign-ups; existing members keep their access.
+`/signup` then says sign-ups are closed and the registration API refuses with 403. Existing members keep their access.
 
 ## Signing in
 

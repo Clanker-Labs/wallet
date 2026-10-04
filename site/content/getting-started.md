@@ -42,7 +42,7 @@ On a fresh database, `/signup` asks for your name and creates a passkey:
 - **Create my passkey** uses this device: Touch ID, Face ID, Windows Hello or your password manager.
 - **Save it on my iPhone (QR code)** shows a QR code on the computer. Scan it with the iPhone camera, confirm with Face ID, and the passkey is stored in iCloud Keychain. Next time, sign in the same way: one tap, or one scan.
 
-The first account is the **owner**. Afterwards sign-ups are closed unless `WALLET_ALLOW_SIGNUP=1` (see [Sign-up](signup.html)). Add more passkeys (a laptop, a security key) in **Settings → Security**.
+The first account is the **owner**. Anyone else can create their own separate wallet at `/signup`; set `WALLET_ALLOW_SIGNUP=0` to close sign-ups (see [Sign-up](signup.html)). Add more passkeys (a laptop, a security key) in **Settings → Security**.
 
 > [!IMPORTANT]
 > Passkeys only work on **https** or on **http://localhost**, not on a raw IP such as `http://192.168.1.10:3000`. To use wallet from your phone on the LAN, put it behind HTTPS (see [Deployment](deployment.html)). Lost every passkey? `npm run auth:link` on the server prints a recovery link.

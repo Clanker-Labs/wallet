@@ -20,7 +20,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "auth:link": "tsx src/bin/login-link.ts"
+    "auth:link": "tsx src/bin/login-link.ts",
+    "site:build": "tsx scripts/site/build.tsx",
+    "site:preview": "node scripts/site/preview.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

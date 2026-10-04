@@ -9,3 +9,4 @@ data/*
 !data/.gitkeep
 coverage
 .DS_Store
+site-dist/

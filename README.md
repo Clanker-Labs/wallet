@@ -1,185 +1,67 @@
-# wallet
+<p align="center">
+  <img src="site/assets/logo.svg" width="64" height="64" alt="">
+</p>
+<h1 align="center">wallet</h1>
+<p align="center"><b>Your money, on your machine.</b><br>
+Net worth, budgets and investments in any currency, with an AI assistant you can drop bank statements on.<br>
+Self-hosted · one SQLite file · passkey sign-in · MIT</p>
 
-Self-hosted personal finance tracker in the spirit of Finary: **net worth** across every asset class (cash, stocks, ETFs, crypto, gold, property, loans…), **monthly budgets**, purchase **simulations**, an **AI assistant** you can drop bank statements on, and **Telegram reminders** that nag you until your numbers are up to date.
+<p align="center">
+  <a href="https://clanker-labs.github.io/wallet/"><b>Docs & demos</b></a> ·
+  <a href="https://clanker-labs.github.io/wallet/getting-started.html">Get started</a> ·
+  <a href="https://clanker-labs.github.io/wallet/architecture.html">How it works</a>
+</p>
 
-Your data stays in one SQLite file on your machine. Sign in with a **passkey**, from this device or from your iPhone by scanning a QR code. There's no password and no OAuth.
-
-![Net worth dashboard](docs/dashboard.png)
-
-| Investments | Assistant (drop a statement) |
-|---|---|
-| ![Holdings with live prices](docs/investments.png) | ![Assistant importing a dropped CSV](docs/assistant.png) |
-| **Simulations** | |
-| ![Mortgage simulator](docs/simulations.png) | |
+<p align="center">
+  <a href="https://clanker-labs.github.io/wallet/"><img src="site/media/net-worth.jpg" alt="wallet: net worth dashboard" width="880"></a>
+</p>
 
 ## What it does
 
-| | |
-|---|---|
-| 📈 **Net worth** | Accounts grouped by asset class: cash, investments, retirement, real estate, crypto, commodities, other, and liabilities. You get monthly history, 1M / YTD / 1Y change and allocation. It also handles ownership shares (a flat bought 50/50) and mortgages that **amortize automatically** from their loan terms. |
-| 📊 **Investments** | Holdings of stocks, ETFs, funds, bonds, crypto and commodities (gold, silver…) with **daily prices** (Yahoo Finance, no key), gain vs cost basis, and allocation by type and currency. Physical assets take a manual price. |
-| 💱 **Any currency** | **USD by default**. Every account, holding and transaction keeps its own currency and is converted to your base currency with **daily rates fetched for free** (currency-api with a Frankfurter/ECB fallback, no key; 200+ fiat currencies, plus BTC, ETH, XAU…). |
-| 🧾 **Budgets** | Monthly envelope per category with a "spending too fast" pace marker, income / expenses / savings rate, and 12-month cash flow. Transfers between your own accounts are ignored. |
-| 🏦 **Transactions** | CSV import wizard (any delimiter, decimal commas, debit/credit columns, legacy encodings) with duplicate-safe re-imports and one-click rules like "always categorize *carrefour* as Groceries". **No bank sync**: you **drop the CSV or PDF on the assistant** instead. |
-| 🏠 **Simulations** | Mortgage calculator, borrowing capacity, buy-vs-rent over N years, and a net-worth projection with a Monte Carlo band and financial-independence date, all prefilled from your data. |
-| 🤖 **Assistant** | Chat in the web app or on Telegram. **Drag & drop statements anywhere in the app** and it reads them (CSV, PDF, screenshots), then imports transactions, records balances and adds holdings through its tools. It runs on the Claude API **or on your local `claude` / `codex` CLI login**. The same 34 tools are exposed as an **MCP server** (stdio + HTTP) and a REST API. |
-| 🔔 **Telegram** | Scheduled reminders (update balances, import the statement, monthly report…) with ✅ / snooze buttons that re-send until done. **Send a statement to the bot** and the assistant imports it. `/update` walks you through every account one question at a time. Other commands: `/networth`, `/budget`, `/balance`, `/spent`, `/ask`. |
-| 👥 **Accounts** | Several people can use one install, each with their own private data. Agent SQL runs on a per-user copy, so the assistant can't read anyone else's data either. |
+- **Net worth** across cash, stocks, retirement, property, crypto, gold and loans. Monthly history, allocation, and partly-owned assets. Mortgages amortize on their own.
+- **Any currency.** USD by default. Every account, holding and transaction keeps its own currency, converted daily with free exchange rates.
+- **Investments.** Stocks, ETFs, funds, crypto and commodities with daily prices and gains. Physical gold takes a manual price.
+- **Budgets.** Monthly envelopes with a pace marker, savings rate and cash flow.
+- **Drop a statement, it's imported.** CSV, PDF or a screenshot, anywhere in the app or sent to the Telegram bot. The assistant runs on the Claude API, or on your local `claude` / `codex` login.
+- **MCP & API.** The same 34 tools for Claude Code, Codex, Claude Desktop or plain HTTP. No token needed on localhost.
+- **Telegram reminders** re-send until you tap ✅. `/update` asks for one balance at a time.
+- **Simulations** for mortgages, borrowing capacity, buy vs rent, and a net-worth projection.
+- **Passkeys only.** Face ID on your iPhone through a QR code; no passwords, no OAuth. Several users per install, each with private data.
+
+Every feature has a short video on the [docs site](https://clanker-labs.github.io/wallet/).
 
 ## Quick start
 
 ```bash
 npm install
-npm run dev                   # http://localhost:3000 → create your account with a passkey
+npm run dev          # http://localhost:3000 → create your account with a passkey
 ```
 
-Requires Node 22+. The database is created and migrated on first use (`./data/wallet.db`; override with `WALLET_DB_PATH`). Copy `.env.example` to `.env` to configure the assistant, Telegram and so on.
-
-**Try it with demo data:** `npm run db:seed-demo` creates "Alex": two years of history, USD and EUR accounts, a brokerage, 401(k), PEA, crypto, gold coins and a mortgage. Then run `npm run auth:link` and open the printed link to sign in as Alex.
-
-The monthly routine the app is built around:
-
-1. 🔔 Telegram pings you on the 1st → tap **Update balances now** and answer one number per account. Investment accounts update themselves from market prices.
-2. 📥 Drop last month's bank statement (CSV or PDF) on the assistant, or send it to the Telegram bot. It imports and categorizes it.
-3. 🤖 Ask what changed: "Where did my money go this month?"
-
-## Sign-in: passkeys
-
-- **Create an account:** pick "Use my iPhone (QR code)" and scan the code with the iPhone camera. Face ID saves a passkey in iCloud Keychain. You can also use this device's Touch ID / Windows Hello / password manager.
-- **Sign in:** same thing, one tap or one scan.
-- **More devices:** go to Settings → Security → Add a passkey.
-- **Lost access:** run `npm run auth:link` on the server. It prints a one-time sign-in link, valid 15 minutes.
-- Passkeys need **https** or **http://localhost**, not a raw IP. Behind a reverse proxy, set `WALLET_PUBLIC_URL`.
-- The first account is the owner. More people can sign up when `WALLET_ALLOW_SIGNUP=1`.
-
-## Production (Docker)
+Want to look around first? Load the demo data, then open the one-time sign-in link it prints:
 
 ```bash
-cp .env.example .env   # WALLET_PUBLIC_URL, Telegram, ANTHROPIC_API_KEY… and WALLET_API_TOKEN if reachable from a network
-docker compose up -d   # web on 127.0.0.1:3000, database on the `wallet-data` volume
+npm run db:seed-demo && npm run auth:link
 ```
 
-The web port is published on **loopback**, not `0.0.0.0`. Passkeys need https or
-localhost anyway, so put a tailnet, a tunnel or an HTTPS proxy in front of it
-rather than exposing the port.
+Node 22+. For Docker, Telegram, the assistant and HTTPS (passkeys need it outside localhost), see [Getting started](https://clanker-labs.github.io/wallet/getting-started.html) and [Configuration](https://clanker-labs.github.io/wallet/configuration.html).
 
-Two optional knobs:
+## Docs
 
 | | |
 |---|---|
-| `WALLET_PORT` | Host port for the web app (default `3000`). |
-| `WALLET_DATA` | Host path for the database. Unset uses the named volume; set it to bind a directory instead — do that when something on the host backs you up, because a named volume lives under `/var/lib/docker` where a backup sweeping your app directories will not find it. The container runs as uid 1000, which owns the files it creates there. |
-
-Telegram is **opt-in**: `docker compose --profile telegram up -d` adds the worker.
-It is out of the default stack because it exits when `TELEGRAM_BOT_TOKEN` is
-unset, which under a restart policy is a crash loop rather than a clear error.
-
-Without Docker, run `npm run build && npm start` for the web app and `npm run worker` for Telegram, prices and FX. Keep both running, e.g. with systemd or pm2.
-
-Put it behind HTTPS. Pages always require a passkey session. While `WALLET_API_TOKEN` is empty, the API and MCP endpoints need **no token from this machine**, because the app is meant to run locally. Token-less calls must target a `localhost` host and can't come from another website in your browser. That blocks DNS rebinding and cross-site requests. It doesn't stop someone who can reach the port directly, so **set a token as soon as the app is reachable from a network** (and to use the API/MCP from anywhere else).
-
-## AI assistant & agentic access
-
-All agent surfaces share one tool registry ([`src/server/agent/tools.ts`](src/server/agent/tools.ts)):
-
-- **Read:** overview, net worth and history, accounts, transactions, spending, budgets, cash flow, holdings, symbol search, currency conversion, read-only SQL over your own data.
-- **Simulate:** mortgage, borrowing capacity, buy vs rent, projection.
-- **Files:** list, read and import uploads.
-- **Write:** record balances, add / import / categorize transactions, budgets, accounts, holdings, reminders.
-
-Set `WALLET_AGENT_READONLY=1` to hide the write tools everywhere.
-
-### 1. Built-in chat (web + Telegram)
-
-Pick a backend with `WALLET_AGENT_PROVIDER`:
-
-| Provider | Uses | Setup |
-|---|---|---|
-| `anthropic` (default) | Claude API (`claude-opus-5-5`, adaptive thinking, server-side refusal fallback). PDFs and images are sent natively. | `ANTHROPIC_API_KEY=…` or `ant auth login` |
-| `claude-code` | your local Claude Code login, headless | `claude` on the PATH |
-| `codex` | your local Codex login, headless | `codex` on the PATH |
-
-Local CLI providers get the wallet MCP server as their **only** tool (no shell, no file access). They read dropped files through `read_upload`.
-
-**Importing statements:** drop files on the chat, or anywhere in the app. You can also use the 📎 button or send them to the Telegram bot. CSVs are imported server-side with `import_csv_upload` (columns guessed, previewed with a dry run, duplicates skipped). For PDFs and screenshots, the model extracts the rows and calls `import_transactions`. Broker statements become holdings (`upsert_holding`).
-
-### 2. MCP server: use your wallet from Claude Code, Codex, Claude Desktop…
-
-```bash
-# Claude Code (stdio), acts as the owner (or WALLET_USER_ID)
-claude mcp add wallet -- node /path/to/wallet/bin/wallet-mcp.mjs
-
-# Codex: ~/.codex/config.toml
-[mcp_servers.wallet]
-command = "node"
-args = ["/path/to/wallet/bin/wallet-mcp.mjs"]
-
-# Streamable HTTP: no token needed by default (local use)
-claude mcp add --transport http wallet http://localhost:3000/api/mcp
-# …once WALLET_API_TOKEN is set:
-claude mcp add --transport http wallet https://wallet.example.com/api/mcp \
-  --header "Authorization: Bearer $WALLET_API_TOKEN"
-```
-
-Opening Claude Code inside this repo picks up [`.mcp.json`](.mcp.json) automatically.
-
-### 3. HTTP API
-
-```bash
-# Upload a statement, then ask the assistant to import it
-curl -F file=@october.csv localhost:3000/api/uploads             # → [{"id":"…","kind":"csv",…}]
-curl -X POST localhost:3000/api/agent -H 'Content-Type: application/json' \
-  -d '{"message":"Import this into Chase checking","attachments":["<upload id>"]}'
-
-# Call any tool directly (no LLM)
-curl localhost:3000/api/tools                                    # list + JSON schemas
-curl -X POST localhost:3000/api/tools/get_budget_status -H 'Content-Type: application/json' -d '{"month":"2026-09"}'
-```
-
-Add `-H "Authorization: Bearer $WALLET_API_TOKEN"` when a token is set.
-
-## Telegram reminders
-
-1. Create a bot with [@BotFather](https://t.me/BotFather), set `TELEGRAM_BOT_TOKEN`, and run `npm run worker`.
-2. In the web app go to **Settings → Telegram → Generate link code**, then send `/start CODE` to your bot. Each user links their own chat and only ever sees their own data.
-3. Create reminders in **Reminders** (presets: update balances on the 1st, import the statement on the 3rd, monthly report…). Set "re-send every 24h" and it keeps nagging until you tap ✅.
-
-The worker also refreshes FX rates and market prices every hour. `npm run worker -- --test` sends a test message; `--once` runs a single scheduler tick (for cron).
-
-## Concepts
-
-- **Accounts & snapshots:** an account's balance on any date is its latest snapshot on or before that date. Loans with loan terms compute their balance from the amortization schedule. Accounts with holdings are valued from `quantity × price` today and snapshotted daily for history.
-- **Currencies:** amounts are stored in their own currency (integer cents) and converted when shown, using the rate on or before each date. Rates are stored per USD and refreshed daily. A missing rate is flagged on the dashboard, never silently mixed in.
-- **Liabilities** are stored as positive amounts owed and subtracted from net worth.
-- **Ownership %** scales an account's contribution (joint flat, shared mortgage).
-- **Categories** are `income`, `expense` or `transfer`. Transfers (e.g. "to brokerage") never count as spending.
-- **Rules:** "description contains *pattern*" → category. The longest match wins. Rules apply on import and on demand.
+| [Features](https://clanker-labs.github.io/wallet/) | Each page has its demo video: net worth, accounts, investments, budgets, transactions, assistant, simulations, Telegram, settings |
+| [Architecture](https://clanker-labs.github.io/wallet/architecture.html) | Layers, request flow, multi-user isolation |
+| [Security](https://clanker-labs.github.io/wallet/security.html) | Passkeys, sessions, the local-only token-less API, the agent's SQL sandbox |
+| [Agent tools](https://clanker-labs.github.io/wallet/tools.html) · [HTTP API](https://clanker-labs.github.io/wallet/api.html) | Generated from the code |
+| [Data model](https://clanker-labs.github.io/wallet/data-model.html) · [Configuration](https://clanker-labs.github.io/wallet/configuration.html) | Every table and every environment variable |
 
 ## Development
 
 ```bash
-npm test            # vitest: finance math, services, multi-user isolation, FX, holdings, passkeys (software authenticator), Telegram bot, agent loop
+npm test                 # vitest
 npm run typecheck
-npm run db:generate # after editing src/server/db/schema.ts
-node scripts/demo/sections/net-worth.mjs   # record a demo clip (see scripts/demo/README.md)
+npm run site:build       # docs site → site-dist/
+node scripts/demo/record-all.mjs   # re-record the demo videos (see scripts/demo/README.md)
 ```
 
-```
-src/
-  app/               Next.js pages + API routes (/api/auth, /api/agent, /api/uploads, /api/mcp, /api/tools, /api/export)
-  components/        UI primitives, charts, brand
-  lib/               pure code: money, dates, CSV import, schedules, finance/ (loan, mortgage, buy-vs-rent, projection)
-  server/
-    db/              drizzle schema + SQLite client (auto-migrates)
-    services/        domain logic (users, passkeys, accounts, holdings, prices, fx, net worth, budgets, transactions, uploads…)
-    agent/           tool registry, prompt, attachments, per-user SQL sandbox, providers (Claude API, local CLIs), MCP server
-    telegram/        bot API client, commands, file intake, reminder scheduler
-  bin/               worker (Telegram + prices + FX), mcp (stdio), seed-demo, login-link, migrate
-bin/wallet-mcp.mjs   MCP launcher that works from any directory
-```
-
-## Roadmap ideas
-
-- Budget overrides per month and rollover envelopes.
-- Dividends and realized gains from broker statements.
-- Shared household views (joint accounts across two users).
+Next.js 16 · React 19 · SQLite (better-sqlite3 + drizzle) · Tailwind v4 · Recharts. Notes for coding agents are in [AGENTS.md](AGENTS.md).

@@ -79,7 +79,7 @@ export default async function Dashboard() {
           </div>
           <div className="flex gap-8">
             <Stat label="Assets" value={f.money(nw.assetsCents, { whole: true })} />
-            <Stat label="Liabilities" value={f.money(-nw.liabilitiesCents, { whole: true })} />
+            <Stat label="Liabilities" value={f.money(nw.liabilitiesCents ? -nw.liabilitiesCents : 0, { whole: true })} />
           </div>
         </div>
         <div className="mt-6">

@@ -310,7 +310,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
         {points.length >= 2 ? (
           // The chart formats with the context currency: this account's own (Intl needs a 3-letter code).
           <FormatProvider value={{ currency: /^[A-Z]{3}$/.test(a.currency) ? a.currency : f.currency, locale: f.locale }}>
-            <NetWorthChart points={points} height={240} />
+            <NetWorthChart points={points} height={240} label={liability ? "Owed" : "Balance"} />
           </FormatProvider>
         ) : (
           <p className="text-sm text-ink-2">Record a balance from time to time (monthly is plenty) and the trend shows up here.</p>

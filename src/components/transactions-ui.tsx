@@ -211,6 +211,7 @@ export function CategoryCell({ txId, categoryId, pattern }: { txId: number; cate
         return;
       }
       setOffer(null);
+      bump(res.ruleApplied); // the rows the rule just categorized count too
       toast(
         res.ruleApplied > 0
           ? `Rule saved: “${pattern}” → ${offerCat.name}. ${res.ruleApplied} more transaction${res.ruleApplied > 1 ? "s" : ""} categorized.`

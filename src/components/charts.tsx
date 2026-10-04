@@ -88,12 +88,22 @@ export function NetWorthChart({
 }) {
   const f = useFormat();
   const data = points.map((p) => ({ date: p.date, net: p.netCents / 100 }));
+  // A flat series (e.g. a single balance) would get identical ticks: pad the axis around it.
+  const values = data.map((d) => d.net);
+  const flat = values.length > 0 && Math.max(...values) === Math.min(...values);
+  const pad = flat ? Math.max(Math.abs(values[0]) * 0.2, 100) : 0;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
         <CartesianGrid vertical={false} stroke="var(--grid)" />
         <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={24} />
-        <YAxis {...AXIS} axisLine={false} width={64} tickFormatter={(v) => f.units(v, { compact: true })} domain={["auto", "auto"]} />
+        <YAxis
+          {...AXIS}
+          axisLine={false}
+          width={64}
+          tickFormatter={(v) => f.units(v, { compact: true })}
+          domain={flat ? [Math.max(0, values[0] - pad), values[0] + pad] : ["auto", "auto"]}
+        />
         <Tooltip
           cursor={{ stroke: "var(--axis)", strokeWidth: 1 }}
           content={({ active, payload }) =>

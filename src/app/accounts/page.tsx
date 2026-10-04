@@ -158,7 +158,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                 </div>
                 <div>
                   <div className="text-xs text-muted">Liabilities</div>
-                  <div className="tabular font-medium">{f.money(-liabilitiesCents, { whole: true })}</div>
+                  <div className="tabular font-medium">{f.money(liabilitiesCents ? -liabilitiesCents : 0, { whole: true })}</div>
                 </div>
               </div>
             </div>

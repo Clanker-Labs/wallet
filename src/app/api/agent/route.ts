@@ -7,7 +7,7 @@ export const maxDuration = 300;
 
 const bodySchema = z.object({
   message: z.string().trim().min(1).max(20_000),
-  conversationId: z.string().optional(),
+  conversationId: z.string().nullish(),
   channel: z.enum(["web", "telegram"]).default("web"),
   stream: z.boolean().optional(),
 });
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
 
   if (!wantsStream) {
     try {
-      const res = await runAgent({ ...body, signal: request.signal });
+      const res = await runAgent({ ...body, conversationId: body.conversationId ?? undefined, signal: request.signal });
       return Response.json(res);
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
         }
       };
       try {
-        await runAgent({ ...body, signal: request.signal, onEvent: send });
+        await runAgent({ ...body, conversationId: body.conversationId ?? undefined, signal: request.signal, onEvent: send });
       } catch (err) {
         send({ type: "error", message: err instanceof Error ? err.message : String(err) });
       } finally {

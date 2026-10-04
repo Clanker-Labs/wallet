@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { freshDb } from "./helpers";
-import { archiveAccount, createAccount, findAccounts, listAccounts, recordBalance, staleAccounts } from "@/server/services/accounts";
+import {
+  archiveAccount,
+  createAccount,
+  deleteAccount,
+  findAccounts,
+  listAccounts,
+  recordBalance,
+  staleAccounts,
+  unarchiveAccount,
+} from "@/server/services/accounts";
 import { netWorthHistory, netWorthOn } from "@/server/services/networth";
 import { addTransaction, categorizeTransactions, importTransactions, listTransactions } from "@/server/services/transactions";
 import { findCategory, matchCategory, suggestPattern, upsertRule } from "@/server/services/categories";
@@ -55,6 +64,15 @@ describe("net worth", () => {
     expect(netWorthOn("2025-06-01").liabilitiesCents).toBe(0); // before the loan existed
     archiveAccount(loan.id);
     expect(netWorthOn().liabilitiesCents).toBe(0);
+    unarchiveAccount(loan.id); // the schedule applies again
+    expect(netWorthOn().liabilitiesCents).toBe(110_000_00);
+  });
+
+  it("unlinks loans when their property is deleted", () => {
+    const flat = createAccount({ name: "Flat", type: "real_estate", initialBalance: 300_000 });
+    const loan = createAccount({ name: "Loan", type: "mortgage", linkedAccountId: flat.id, initialBalance: 200_000 });
+    deleteAccount(flat.id);
+    expect(listAccounts().find((a) => a.id === loan.id)!.linkedAccountId).toBeNull();
   });
 
   it("finds accounts by fuzzy name and flags stale ones", () => {
@@ -74,6 +92,7 @@ describe("transactions & budgets", () => {
     expect(matchCategory("CB CARREFOUR CITY")).toBe(cat("Groceries"));
     expect(matchCategory("CARREFOUR VOYAGES 12/03")).toBe(cat("Travel"));
     expect(suggestPattern("CB CARREFOUR CITY 12/03 PARIS")).toBe("carrefour city");
+    expect(suggestPattern("PAYPAL *VINTED")).toBe("paypal"); // must match its own label
   });
 
   it("computes budget status, excluding transfers and netting refunds", () => {

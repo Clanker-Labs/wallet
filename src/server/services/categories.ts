@@ -132,5 +132,10 @@ export function suggestPattern(description: string): string {
     .replace(/\s+/g, " ")
     .trim();
   const words = cleaned.split(" ").filter((w) => w.length > 1);
-  return words.slice(0, 2).join(" ") || description.toLowerCase().trim();
+  // The pattern must match its own label ("PAYPAL *VINTED" → "paypal", not "paypal vinted").
+  const normalized = normalizePattern(description);
+  const pair = words.slice(0, 2).join(" ");
+  if (pair && normalized.includes(pair)) return pair;
+  if (words[0] && normalized.includes(words[0])) return words[0];
+  return normalized;
 }

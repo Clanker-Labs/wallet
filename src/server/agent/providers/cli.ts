@@ -19,12 +19,13 @@ const BINARIES: Record<CliKind, string> = {
   codex: process.env.WALLET_CODEX_BIN || "codex",
 };
 
+// Paths below are runtime-only: `turbopackIgnore` keeps the build from tracing the whole project.
 export function cliAvailable(kind: CliKind): boolean {
   const bin = BINARIES[kind];
-  if (bin.includes(path.sep)) return fs.existsSync(bin);
+  if (bin.includes(path.sep)) return fs.existsSync(/*turbopackIgnore: true*/ bin);
   return (process.env.PATH ?? "")
     .split(path.delimiter)
-    .some((dir) => dir && fs.existsSync(path.join(dir, bin)));
+    .some((dir) => dir && fs.existsSync(/*turbopackIgnore: true*/ path.join(/*turbopackIgnore: true*/ dir, bin)));
 }
 
 /** How a CLI agent should launch the wallet MCP server (stdio). */
@@ -107,7 +108,7 @@ export async function runCliTurn(opts: {
   onEvent: (e: AgentEvent) => void;
   signal?: AbortSignal;
 }): Promise<{ text: string; sessionId: string | null }> {
-  const child = spawn(BINARIES[opts.kind], buildArgs(opts.kind, opts.message, opts.channel, opts.sessionId), {
+  const child = spawn(/*turbopackIgnore: true*/ BINARIES[opts.kind], buildArgs(opts.kind, opts.message, opts.channel, opts.sessionId), {
     cwd: workDir(),
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],

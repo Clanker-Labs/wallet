@@ -66,8 +66,7 @@ export function deleteTransaction(id: number) {
   db().delete(transactions).where(eq(transactions.id, id)).run();
 }
 
-export function listTransactions(raw: TransactionFilter = {}) {
-  const f = transactionFilterSchema.parse(raw);
+function filterWhere(f: z.output<typeof transactionFilterSchema>) {
   const where: SQL[] = [];
   if (f.from) where.push(gte(transactions.date, f.from));
   if (f.to) where.push(lte(transactions.date, f.to));
@@ -75,7 +74,12 @@ export function listTransactions(raw: TransactionFilter = {}) {
   if (f.categoryId === "none") where.push(isNull(transactions.categoryId));
   else if (f.categoryId) where.push(eq(transactions.categoryId, f.categoryId));
   if (f.search) where.push(like(transactions.description, `%${f.search}%`));
-  const cond = where.length ? and(...where) : undefined;
+  return where.length ? and(...where) : undefined;
+}
+
+export function listTransactions(raw: TransactionFilter = {}) {
+  const f = transactionFilterSchema.parse(raw);
+  const cond = filterWhere(f);
 
   const rows = db()
     .select({
@@ -123,6 +127,27 @@ export function categorizeTransactions(ids: number[], categoryId: number | null,
       .run().changes;
   }
   return { updated: ids.length, ruleApplied };
+}
+
+/** Count, money in and money out for the same filters as `listTransactions`. */
+export function transactionTotals(raw: TransactionFilter = {}) {
+  const f = transactionFilterSchema.parse(raw);
+  const row = db()
+    .select({
+      count: sql<number>`count(*)`,
+      inCents: sql<number>`coalesce(sum(case when ${transactions.amountCents} > 0 then ${transactions.amountCents} end), 0)`,
+      outCents: sql<number>`coalesce(sum(case when ${transactions.amountCents} < 0 then ${transactions.amountCents} end), 0)`,
+    })
+    .from(transactions)
+    .where(filterWhere(f))
+    .get();
+  return { count: row?.count ?? 0, inCents: row?.inCents ?? 0, outCents: row?.outCents ?? 0 };
+}
+
+/** First month with a transaction (YYYY-MM). */
+export function firstTransactionMonth(): string | null {
+  const row = db().select({ d: sql<string | null>`min(${transactions.date})` }).from(transactions).get();
+  return row?.d ? row.d.slice(0, 7) : null;
 }
 
 export function countUncategorized(): number {

@@ -98,11 +98,28 @@ export function archiveAccount(id: number) {
   recordBalance({ accountId: id, balance: 0, date, note: "Account closed", source: "archive" });
 }
 
+/** Reopen an account. Drops the 0 "closed" snapshot so its last real balance (or loan schedule) applies again. */
 export function unarchiveAccount(id: number) {
+  const account = getAccountRow(id);
+  if (account.archivedAt) {
+    db()
+      .delete(balanceSnapshots)
+      .where(
+        and(
+          eq(balanceSnapshots.accountId, id),
+          eq(balanceSnapshots.date, account.archivedAt),
+          eq(balanceSnapshots.source, "archive"),
+          eq(balanceSnapshots.balanceCents, 0),
+        ),
+      )
+      .run();
+  }
   db().update(accounts).set({ archivedAt: null }).where(eq(accounts.id, id)).run();
 }
 
 export function deleteAccount(id: number) {
+  // Loans pointing at this account would keep a dangling link.
+  db().update(accounts).set({ linkedAccountId: null }).where(eq(accounts.linkedAccountId, id)).run();
   db().delete(accounts).where(eq(accounts.id, id)).run();
 }
 

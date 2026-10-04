@@ -121,10 +121,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-input,
-select,
-textarea {
-  font: inherit;
+@layer base {
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
 }
 
 :focus-visible {

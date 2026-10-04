@@ -4,7 +4,11 @@ Self-hosted personal finance tracker in the spirit of Finary: **net worth** acro
 
 Your data stays in one SQLite file on your machine.
 
-![dashboard](docs/dashboard.png)
+![Net worth dashboard](docs/dashboard.png)
+
+| Simulations | Assistant |
+|---|---|
+| ![Mortgage simulator](docs/simulations.png) | ![Assistant answering from your data](docs/assistant.png) |
 
 ## What it does
 

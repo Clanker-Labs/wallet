@@ -2,7 +2,9 @@
  * Wallet MCP server over stdio — plug it into Claude Code, Codex, Claude
  * Desktop or any MCP client:
  *
- *   claude mcp add wallet -- npx tsx /path/to/wallet/src/bin/mcp.ts
+ *   claude mcp add wallet -- node /path/to/wallet/bin/wallet-mcp.mjs
+ *
+ * (bin/wallet-mcp.mjs wraps this file so it works from any working directory.)
  *
  * Reads/writes the same SQLite file as the web app (WALLET_DB_PATH).
  */

@@ -188,7 +188,7 @@ export function AssistantChat({
       const res = await fetch("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({ message, conversationId, stream: true }),
+        body: JSON.stringify({ message, conversationId: conversationId ?? undefined, stream: true }),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) throw new Error((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);

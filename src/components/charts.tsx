@@ -76,7 +76,16 @@ const shortMonth = (iso: string) => DateTime.fromISO(iso).toFormat("LLL yy");
 
 // ── Net worth over time ──────────────────────────────────────────────────
 
-export function NetWorthChart({ points, height = 260 }: { points: { date: string; netCents: number }[]; height?: number }) {
+export function NetWorthChart({
+  points,
+  height = 260,
+  label = "Net worth",
+}: {
+  points: { date: string; netCents: number }[];
+  height?: number;
+  /** Series name in the tooltip (e.g. "Balance" on an account page). */
+  label?: string;
+}) {
   const f = useFormat();
   const data = points.map((p) => ({ date: p.date, net: p.netCents / 100 }));
   return (
@@ -91,7 +100,7 @@ export function NetWorthChart({ points, height = 260 }: { points: { date: string
             active && payload?.length ? (
               <TooltipBox
                 title={DateTime.fromISO(String(payload[0].payload.date)).toFormat("d LLL yyyy")}
-                rows={[{ label: "Net worth", value: f.units(Number(payload[0].value), { whole: true }), color: "var(--series-1)" }]}
+                rows={[{ label, value: f.units(Number(payload[0].value), { whole: true }), color: "var(--series-1)" }]}
               />
             ) : null
           }

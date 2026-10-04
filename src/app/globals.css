@@ -1,0 +1,368 @@
+@import "tailwindcss";
+
+/*
+ * wallet design tokens. Light is the default; dark applies from the OS setting
+ * unless the user picked a theme (data-theme on <html>), which wins both ways.
+ *
+ * Brand: deep indigo/iris primary (never used for gain/loss), cool navy-tinted
+ * neutrals, emerald gains, coral-red losses, a warm gold used sparingly.
+ *
+ * Contrast (WCAG, vs --surface; light / dark):
+ *   --text 18.7 / 16.7 · --text-2 7.9 / 9.4 · --muted 5.2 / 5.7
+ *   --accent-text 6.4 / 7.6 · --gain-text 5.7 / 10.4 · --loss-text 5.3 / 8.1
+ *   white on --accent (primary buttons) 5.6 / 4.6 · all text steps also ≥4.5 on --surface-2
+ * `bg-accent` and `text-accent` use different steps in dark mode: no single
+ * indigo clears 4.5:1 both as a fill under white text and as text on the dark
+ * surface, so `text-accent` reads --accent-text (see the end of this file).
+ *
+ * ── Categorical chart palette (asset classes, fixed order — lib/domain ASSET_CLASS_SLOT)
+ *   slot  class         hue        light     dark
+ *   1     cash          indigo     #5b4fe9   #7c72ff
+ *   2     investments   teal       #09a198   #05aaa1
+ *   3     retirement    plum       #952d9d   #a53ead
+ *   4     real_estate   terracotta #b55508   #bc5806
+ *   5     crypto        azure      #119ed8   #16a0d9
+ *   6     commodities   ochre gold #b98a02   #ba8b07
+ *   7     other         raspberry  #ba365f   #c4446a
+ * The order was picked by enumerating hue→slot assignments and lightness
+ * steps, keeping only those clearing every adjacent gate in both modes, then
+ * maximising separation for pairs two apart (a donut with an empty class).
+ *
+ * Validator (dataviz validate_palette.js, OKLab ΔE×100, Machado 2009 CVD):
+ *   light, surface #ffffff, adjacent — ALL CHECKS PASS
+ *     L band 0.43–0.77 PASS · chroma ≥0.10 PASS · CVD worst 15.8 (deutan,
+ *     #ba365f↔#b98a02) PASS · normal-vision worst 22.9 PASS · all ≥3:1 PASS
+ *   dark, surface #0e1422, adjacent — ALL CHECKS PASS
+ *     L band 0.48–0.67 PASS · chroma PASS · CVD worst 13.8 (deutan,
+ *     #c4446a↔#ba8b07) PASS · normal-vision worst 21.1 PASS · all ≥3:1 PASS
+ *   --pairs all (scatter, small multiples, any-two-touch forms):
+ *     slots 1–4 PASS in both modes (worst 1↔3: CVD 12.2 / 12.9, normal 16.7 / 16.6).
+ *     All 7: CVD worst 8.8 / 8.7 PASS, normal-vision worst 10.2 / 9.8 FAIL
+ *     (teal 2 ↔ azure 5) — the series cap: past four series in an all-pairs
+ *     form, fold into "Other" or facet. Stacks, donuts and bars are fine.
+ *   On --page (not a chart surface) slots 2, 5, 6 sit at 2.8–3.0:1 in light
+ *   mode: always draw charts on a card (--surface).
+ * Status colors stay distinct from series (nearest: gain↔teal ΔE 8.6 light /
+ * 11.7 dark, loss↔raspberry 10.3) and always ship with an icon or sign.
+ */
+:root {
+  color-scheme: light;
+  --page: #f5f6fa;
+  --surface: #ffffff;
+  --surface-2: #f0f2f7;
+  --border: rgba(16, 24, 48, 0.09);
+  --border-strong: rgba(16, 24, 48, 0.16);
+  --text: #0b1220;
+  --text-2: #475167;
+  --muted: #646d84;
+  --grid: #e8ebf2;
+  --axis: #c9cfdb;
+
+  --brand: #5b4fe9;
+  --brand-2: #8b5cf6;
+  --accent: #5b4fe9;
+  --accent-ink: #ffffff;
+  --accent-text: #5046e0;
+  --gold: #d9a12b;
+
+  --gain: #0fa05c;
+  --gain-text: #0b7643;
+  --loss: #e5484d;
+  --loss-text: #c82f3c;
+  --warning: #f5a524;
+  --serious: #ef7b45;
+
+  --series-1: #5b4fe9;
+  --series-2: #09a198;
+  --series-3: #952d9d;
+  --series-4: #b55508;
+  --series-5: #119ed8;
+  --series-6: #b98a02;
+  --series-7: #ba365f;
+
+  --glow: rgba(91, 79, 233, 0.16);
+  --glow-2: rgba(139, 92, 246, 0.12);
+  --card-shadow: 0 1px 2px rgba(16, 24, 48, 0.04), 0 1px 3px rgba(16, 24, 48, 0.03);
+  --pop-shadow: 0 12px 32px -8px rgba(16, 24, 48, 0.16), 0 2px 6px rgba(16, 24, 48, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #070b14;
+    --surface: #0e1422;
+    --surface-2: #172033;
+    --border: rgba(160, 176, 220, 0.12);
+    --border-strong: rgba(160, 176, 220, 0.22);
+    --text: #f1f4fa;
+    --text-2: #b2bacb;
+    --muted: #8590a6;
+    --grid: #1c2436;
+    --axis: #2c3650;
+
+    --brand: #7c72ff;
+    --brand-2: #a47bff;
+    --accent: #6a60f2;
+    --accent-ink: #ffffff;
+    --accent-text: #a29bff;
+    --gold: #e8be5a;
+
+    --gain: #3ec87d;
+    --gain-text: #5fd993;
+    --loss: #f0565b;
+    --loss-text: #ff8a85;
+    --warning: #f5a524;
+    --serious: #f08a55;
+
+    --series-1: #7c72ff;
+    --series-2: #05aaa1;
+    --series-3: #a53ead;
+    --series-4: #bc5806;
+    --series-5: #16a0d9;
+    --series-6: #ba8b07;
+    --series-7: #c4446a;
+
+    --glow: rgba(124, 114, 255, 0.22);
+    --glow-2: rgba(164, 123, 255, 0.14);
+    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --pop-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #070b14;
+  --surface: #0e1422;
+  --surface-2: #172033;
+  --border: rgba(160, 176, 220, 0.12);
+  --border-strong: rgba(160, 176, 220, 0.22);
+  --text: #f1f4fa;
+  --text-2: #b2bacb;
+  --muted: #8590a6;
+  --grid: #1c2436;
+  --axis: #2c3650;
+
+  --brand: #7c72ff;
+  --brand-2: #a47bff;
+  --accent: #6a60f2;
+  --accent-ink: #ffffff;
+  --accent-text: #a29bff;
+  --gold: #e8be5a;
+
+  --gain: #3ec87d;
+  --gain-text: #5fd993;
+  --loss: #f0565b;
+  --loss-text: #ff8a85;
+  --warning: #f5a524;
+  --serious: #f08a55;
+
+  --series-1: #7c72ff;
+  --series-2: #05aaa1;
+  --series-3: #a53ead;
+  --series-4: #bc5806;
+  --series-5: #16a0d9;
+  --series-6: #ba8b07;
+  --series-7: #c4446a;
+
+  --glow: rgba(124, 114, 255, 0.22);
+  --glow-2: rgba(164, 123, 255, 0.14);
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --pop-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* Derived tokens: resolved per theme because they only reference the base tokens above. */
+:root {
+  /* Legacy names kept as aliases — good/critical are gain/loss. */
+  --good: var(--gain);
+  --good-text: var(--gain-text);
+  --critical: var(--loss);
+  --critical-text: var(--loss-text);
+  /* Meter track: a light wash of the accent hue over the surface, in both modes. */
+  --series-1-track: color-mix(in srgb, var(--series-1) 20%, var(--surface));
+  --brand-tint: color-mix(in srgb, var(--brand) 11%, transparent);
+  --ring: var(--accent-text);
+  --brand-gradient: linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
+  /* Hero card / auth backdrop: two soft brand glows over the surface. */
+  --hero-bg: radial-gradient(120% 90% at 0% 0%, var(--glow) 0%, transparent 55%),
+    radial-gradient(90% 80% at 100% 0%, var(--glow-2) 0%, transparent 60%), var(--surface);
+  --auth-bg: radial-gradient(70% 50% at 50% -5%, var(--glow) 0%, transparent 70%),
+    radial-gradient(45% 40% at 95% 105%, var(--glow-2) 0%, transparent 70%), var(--page);
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-muted: var(--muted);
+  --color-grid: var(--grid);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-text: var(--accent-text);
+  --color-brand: var(--brand);
+  --color-brand-2: var(--brand-2);
+  --color-brand-tint: var(--brand-tint);
+  --color-gold: var(--gold);
+  --color-gain: var(--gain);
+  --color-gain-text: var(--gain-text);
+  --color-loss: var(--loss);
+  --color-loss-text: var(--loss-text);
+  --color-good: var(--good);
+  --color-good-text: var(--good-text);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --color-critical-text: var(--critical-text);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+  --color-series-6: var(--series-6);
+  --color-series-7: var(--series-7);
+  --shadow-card: var(--card-shadow);
+  --shadow-pop: var(--pop-shadow);
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* bg-brand-gradient, bg-hero (hero card), bg-auth (sign-in backdrop) */
+@utility bg-brand-gradient {
+  background-image: var(--brand-gradient);
+}
+@utility bg-hero {
+  background: var(--hero-bg);
+}
+@utility bg-auth {
+  background: var(--auth-bg);
+}
+
+html,
+body {
+  background: var(--page);
+  color: var(--text);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numbers that line up in columns */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@layer base {
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--brand) 24%, transparent);
+}
+
+/* Quiet scrollbars that follow the theme */
+html {
+  scrollbar-color: var(--axis) transparent;
+}
+* {
+  scrollbar-width: thin;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--axis);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Markdown in assistant answers */
+.prose-chat {
+  line-height: 1.55;
+}
+.prose-chat p {
+  margin: 0.4em 0;
+}
+.prose-chat ul,
+.prose-chat ol {
+  margin: 0.4em 0;
+  padding-left: 1.3em;
+}
+.prose-chat ul {
+  list-style: disc;
+}
+.prose-chat ol {
+  list-style: decimal;
+}
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  font-weight: 600;
+  margin: 0.8em 0 0.3em;
+}
+.prose-chat table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
+  display: block;
+  overflow-x: auto;
+}
+.prose-chat th,
+.prose-chat td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.3em 0.75em 0.3em 0;
+  text-align: left;
+}
+.prose-chat code {
+  background: var(--surface-2);
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+  font-size: 0.85em;
+}
+.prose-chat pre {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 0.75em;
+  overflow-x: auto;
+}
+.prose-chat strong {
+  font-weight: 600;
+}
+.prose-chat a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/*
+ * `text-accent` as text: in dark mode the button fill (--accent, white text
+ * 4.6:1) is too dark for text on the surface (4.0:1), so accent-colored text
+ * reads the lighter --accent-text step (7.6:1). Same layer as Tailwind's
+ * utilities and later in source, so it wins over the generated rule while
+ * hover:/focus: variants (higher specificity) still apply.
+ */
+@layer utilities {
+  .text-accent {
+    color: var(--accent-text);
+  }
+}

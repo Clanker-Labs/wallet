@@ -25,6 +25,19 @@ COPY --from=build /app/package.json /app/tsconfig.json ./
 COPY --from=build /app/src ./src
 COPY --from=build /app/bin ./bin
 COPY --from=build /app/drizzle ./drizzle
+
+# Runs as the image's unprivileged `node` user (uid 1000), not root.
+#
+# Two reasons, and the second is the one that bites. Obviously an app holding
+# every account you own should not be root in its own container. Less
+# obviously: when /data is a bind mount, whoever the container runs as owns the
+# files that appear in your directory. As root that is a database, a -wal and a
+# -shm you cannot write — and opening a WAL database read-only still needs to
+# write the -shm, so a backup running as you fails on its own data. The
+# directory is created here so the ownership is right even on first start.
+RUN mkdir -p /data && chown -R node:node /data /app
+USER node
+
 VOLUME /data
 EXPOSE 3000
 CMD ["node", "server.js"]

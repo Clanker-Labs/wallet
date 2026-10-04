@@ -1,4 +1,11 @@
 # docker compose up -d   → web on :3000 + Telegram worker, sharing one SQLite volume.
+#
+# Two knobs, both for putting this on a real machine:
+#
+#   WALLET_PORT   host port for the web app (default 3000)
+#   WALLET_DATA   host path for the database; unset uses the named volume
+#
+# Neither has to be set to run it locally.
 services:
   web:
     build: .
@@ -6,25 +13,44 @@ services:
     env_file: .env
     environment:
       WALLET_DB_PATH: /data/wallet.db
+    # Bound to LOOPBACK, not 0.0.0.0. This app holds net worth, bank statements
+    # and every account you own, and sign-in is passkey-only — which means a
+    # relying-party id tied to one hostname, so it cannot be hardened by simply
+    # being reachable. Put a tailnet, a tunnel or an authenticating proxy in
+    # front of it; do not publish the port. Passkeys need https or localhost
+    # anyway, so a bare LAN address would not work even if you wanted it.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:${WALLET_PORT:-3000}:3000"
+    # Defaults to the named volume. Set WALLET_DATA to a host path to bind a
+    # directory instead — do that when something on the host backs this up, a
+    # named volume lives under /var/lib/docker where a backup that sweeps your
+    # app directories will never see it. This is the one file that is not
+    # reproducible from anywhere.
     volumes:
-      - wallet-data:/data
+      - ${WALLET_DATA:-wallet-data}:/data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
 
+  # Telegram reminders. OPT-IN: `docker compose --profile telegram up -d`.
+  #
+  # Not in the default stack because Telegram is optional and the worker exits
+  # non-zero when TELEGRAM_BOT_TOKEN is unset — correct for someone running
+  # `npm run worker` in a terminal, a hot restart loop under `unless-stopped`.
+  # A crash-looping sidecar is expensive in a way that is hard to see: it looks
+  # like one dead container while it churns the machine behind it.
   worker:
     build: .
+    profiles: ["telegram"]
     restart: unless-stopped
     env_file: .env
     environment:
       WALLET_DB_PATH: /data/wallet.db
     command: ["node", "node_modules/tsx/dist/cli.mjs", "src/bin/worker.ts"]
     volumes:
-      - wallet-data:/data
+      - ${WALLET_DATA:-wallet-data}:/data
     depends_on:
       - web
 

@@ -68,12 +68,15 @@ Every variable is listed in [Configuration](configuration.html).
 
 ## Run it for real
 
-**With Docker** (web app and worker sharing one volume):
+**With Docker:**
 
 ```bash
-cp .env.example .env    # set WALLET_PUBLIC_URL, and WALLET_API_TOKEN if the port is reachable from a network
-docker compose up -d    # web on :3000, Telegram/prices/FX worker alongside
+cp .env.example .env                       # set WALLET_PUBLIC_URL, and WALLET_API_TOKEN if the port is reachable from a network
+docker compose up -d                       # web on 127.0.0.1:3000 (loopback only)
+docker compose --profile telegram up -d    # add the Telegram / prices / FX worker
 ```
+
+`WALLET_PORT` changes the host port and `WALLET_DATA` binds the database to a host directory; see [Deployment](deployment.html#docker-compose).
 
 **Without Docker:**
 

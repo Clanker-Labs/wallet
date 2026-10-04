@@ -11,7 +11,7 @@ A net worth tracker is only as good as its last update. wallet's answer is a Tel
 
 ## Setting it up
 
-1. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`), put its token in `.env` as `TELEGRAM_BOT_TOKEN`, and start the worker: `npm run worker` (it runs alongside the web app in Docker).
+1. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`), put its token in `.env` as `TELEGRAM_BOT_TOKEN`, and start the worker: `npm run worker`, or `docker compose --profile telegram up -d` in Docker.
 2. In the web app, open **Settings → Telegram → Generate link code** and send `/start CODE` to your bot, or tap the one-tap *Open in Telegram* link. The code is valid 30 minutes.
 3. Check it works: `npm run worker -- --test` sends a test message to every linked chat.
 

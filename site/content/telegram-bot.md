@@ -10,7 +10,7 @@ Code: [src/server/telegram](gh:src/server/telegram) and [src/bin/worker.ts](gh:s
 
 ## The worker
 
-`npm run worker` (the `worker` service in Docker) is one long-running process:
+`npm run worker` (the `worker` service in Docker, started with `--profile telegram`) is one long-running process:
 
 | Loop | Every | Does |
 |---|---|---|

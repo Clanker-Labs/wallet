@@ -5,24 +5,36 @@ section: technical
 order: 7
 ---
 
-wallet is two processes over one SQLite file: the **web app** (Next.js) and the **worker** (Telegram, reminders, hourly FX rates and prices). Run both, keep the file safe, and put HTTPS in front.
+wallet is two processes over one SQLite file: the **web app** (Next.js) and an optional **worker** (Telegram, reminders, hourly FX rates and prices). Keep the file safe and put HTTPS in front.
 
 ## Docker Compose
 
 ```bash
-cp .env.example .env    # see the checklist below
-docker compose up -d    # builds the image, starts web on :3000 and the worker
+cp .env.example .env                          # see the checklist below
+docker compose up -d                          # web on 127.0.0.1:3000
+docker compose --profile telegram up -d       # …plus the Telegram worker (opt-in)
 docker compose logs -f worker
 ```
 
-[docker-compose.yml](gh:docker-compose.yml) defines two services from the same image, both reading `.env` and sharing the `wallet-data` volume at `/data` (`WALLET_DB_PATH=/data/wallet.db`):
+[docker-compose.yml](gh:docker-compose.yml) defines two services from the same image. Both read `.env` and use the same database at `/data/wallet.db` (`WALLET_DB_PATH`):
 
 | Service | Runs | Notes |
 |---|---|---|
-| `web` | `node server.js` (Next.js standalone output) on port 3000 | Healthcheck: `GET /api/health` every 30 s |
-| `worker` | `tsx src/bin/worker.ts` | Needs `TELEGRAM_BOT_TOKEN`; without it the worker exits with setup instructions. Remove the service if you don't use Telegram (you then lose the hourly rate and price refresh too). |
+| `web` | `node server.js` (Next.js standalone output) | Published on **loopback only**: `127.0.0.1:${WALLET_PORT:-3000}`. Healthcheck: `GET /api/health` every 30 s. |
+| `worker` | `tsx src/bin/worker.ts` | Behind the **`telegram` profile**, so it only starts with `--profile telegram`. It needs `TELEGRAM_BOT_TOKEN`; without it, it exits with setup instructions, which under a restart policy would be a crash loop. It also refreshes exchange rates and prices hourly and snapshots investment accounts. Without it, rates update when you click refresh in **Settings → Exchange rates** and prices when you open **Investments**. |
 
-The [Dockerfile](gh:Dockerfile) is multi-stage on `node:22-bookworm-slim`: dependencies are installed with build tools for `better-sqlite3`, the app is built in standalone mode, and the runtime image keeps the standalone server plus `node_modules`, `src`, `bin` and `drizzle`, because the worker and the stdio MCP server run from TypeScript sources through `tsx`.
+Two variables control where things go. Neither is needed to run it locally:
+
+| Variable | Default | Use it when |
+|---|---|---|
+| `WALLET_PORT` | `3000` | Port 3000 is taken on the host. |
+| `WALLET_DATA` | the `wallet-data` named volume | Something on the host backs you up. Set it to a host path to bind a directory: a named volume lives under `/var/lib/docker`, where a backup sweeping your app directories won't find it. |
+
+The container runs as the image's unprivileged `node` user (**uid 1000**), not root. With a bind mount, that means the database and its `-wal` / `-shm` files are owned by uid 1000, so a backup running as a normal user can read them (opening a WAL database read-only still writes the `-shm`).
+
+The port is bound to loopback on purpose. Passkeys only work over https or on `localhost`, so a bare LAN address wouldn't work anyway. Put a tailnet, a tunnel or an HTTPS reverse proxy in front instead of publishing the port.
+
+The [Dockerfile](gh:Dockerfile) is multi-stage on `node:22-bookworm-slim`. Dependencies are installed with build tools for `better-sqlite3`, and the app is built in standalone mode. The runtime image keeps the standalone server plus `node_modules`, `src`, `bin` and `drizzle`, because the worker and the stdio MCP server run from TypeScript sources through `tsx`.
 
 **Updating:** `git pull && docker compose up -d --build`. Migrations run automatically when each process opens the database.
 
@@ -95,7 +107,7 @@ Then set in `.env`:
 | `WALLET_RP_ID` | Only if passkeys should be scoped to a parent domain (e.g. `example.com`). Decide before people register: passkeys are bound to it. |
 | `WALLET_ALLOW_SIGNUP=1` | Only while family members create their accounts. |
 
-Bind the app to localhost (`127.0.0.1:3000:3000` in Compose) when the proxy runs on the same host, so the plain-http port isn't exposed. Sub-path hosting (`example.com/wallet`) isn't supported; use a subdomain.
+Compose already binds the app to `127.0.0.1`, so the proxy must run on the same host (or reach it through a tunnel or tailnet). Without Docker, bind it to localhost too: `npm start -- -H 127.0.0.1`. Sub-path hosting (`example.com/wallet`) isn't supported; use a subdomain.
 
 ## Backups
 
@@ -108,6 +120,8 @@ docker compose cp web:/data/backup.db ./wallet-$(date +%F).db
 
 # Or offline: stop both processes, copy wallet.db (and wallet.db-wal / -shm if present), start again
 ```
+
+With `WALLET_DATA` pointing at a host directory, the file is right there for your usual host backups. Prefer the online copy above, or stop the stack first.
 
 Without Docker, the same one-liner works from the repo directory with `./data/wallet.db`, as does `sqlite3 data/wallet.db ".backup wallet-backup.db"`.
 

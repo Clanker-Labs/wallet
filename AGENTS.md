@@ -1,0 +1,21 @@
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
+
+# Wallet — notes for coding agents
+
+Self-hosted net worth & budget tracker. Next.js 16 (App Router) + React 19 + Tailwind v4 + SQLite (better-sqlite3 + drizzle) + Recharts.
+
+- **Commands:** `npm test` (vitest), `npm run typecheck`, `npm run dev`, `npm run worker` (Telegram), `npm run mcp` (stdio MCP), `npm run db:seed-demo`, `npm run db:generate` after schema changes (commit the generated `drizzle/` files).
+- **Layers:** `src/lib` is pure (safe in the browser); `src/server/services` holds all domain logic and is the only place that touches the DB; pages, API routes, agent tools and the Telegram bot all call services.
+- **Money is integer cents** in the DB and services (`…Cents` fields). Agent tools convert to currency units via `present()`. Dates are ISO strings (`YYYY-MM-DD`, months `YYYY-MM`).
+- **Liabilities** store the amount owed as a positive balance; `ownershipPct` scales net-worth contribution; accounts with `loanParams` derive balances from their amortization schedule.
+- **Agent tools** live in one registry (`src/server/agent/tools.ts`) shared by the Claude API loop, the MCP server (stdio + `/api/mcp`), local CLI providers and `/api/tools`. Add a tool there once; keep descriptions precise — they are prompts.
+- **Agent transcripts are append-only** (`agent_messages`): never edit or delete earlier messages of a conversation (thinking blocks must be replayed unchanged).
+- **UI:** server components by default; mutations via colocated `actions.ts` server actions + `revalidatePath`. Use primitives in `src/components/ui.tsx` and charts in `src/components/charts.tsx`; colors come from CSS variables in `globals.css` (light + dark). Text never uses series colors.

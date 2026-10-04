@@ -41,6 +41,8 @@ function copy(target: Database.Database, table: string, rows: Record<string, unk
 function build(uid: string): Database.Database {
   const src = db().$client;
   const mem = new Database(":memory:");
+  // Copied DDL still references users etc., which deliberately don't exist here.
+  mem.pragma("foreign_keys = OFF");
   mem.transaction(() => {
     for (const t of USER_TABLES) copy(mem, t, src.prepare(`SELECT * FROM "${t}" WHERE user_id = ?`).all(uid) as never);
     copy(
@@ -63,13 +65,13 @@ function build(uid: string): Database.Database {
       src
         .prepare(
           `SELECT * FROM fx_rates WHERE currency IN (
-             SELECT currency FROM accounts WHERE user_id = ?1
-             UNION SELECT currency FROM transactions WHERE user_id = ?1
-             UNION SELECT currency FROM holdings WHERE user_id = ?1
-             UNION SELECT value FROM settings WHERE user_id = ?1 AND key = 'currency'
+             SELECT currency FROM accounts WHERE user_id = @uid
+             UNION SELECT currency FROM transactions WHERE user_id = @uid
+             UNION SELECT currency FROM holdings WHERE user_id = @uid
+             UNION SELECT value FROM settings WHERE user_id = @uid AND key = 'currency'
              UNION SELECT 'USD')`,
         )
-        .all(uid) as never,
+        .all({ uid }) as never,
     );
   })();
   return mem;

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createDb, setDbForTests } from "@/server/db/client";
+import { freshUser } from "./helpers";
+import { setSetting } from "@/server/services/settings";
+import { createUser } from "@/server/services/users";
+import { createTelegramLinkCode } from "@/server/services/telegram-link";
+import { getUpload, listUploads } from "@/server/services/uploads";
 import { createAccount, listAccounts } from "@/server/services/accounts";
 import { setBudget } from "@/server/services/budgets";
 import { findCategory } from "@/server/services/categories";
@@ -48,15 +52,18 @@ function fakeApi(opts: { failSend?: boolean } = {}) {
       answers.push({ id, text });
     },
     async sendChatAction() {},
+    async downloadFile(fileId: string) {
+      return Buffer.from(`Date,Description,Amount\n2026-10-01,Coffee (${fileId}),-3.20\n`);
+    },
   };
 }
 
 function fakeAgent(opts: { ready?: boolean; reason?: string; reply?: string; fail?: Error } = {}) {
-  const calls: { conversationId?: string; message: string }[] = [];
+  const calls: { userId: string; conversationId?: string; message: string; attachments?: string[] }[] = [];
   const port: AgentPort = {
     status: () => ({ ready: opts.ready ?? true, reason: opts.reason }),
     async run(o) {
-      calls.push({ conversationId: o.conversationId, message: o.message });
+      calls.push({ userId: o.userId, conversationId: o.conversationId, message: o.message, attachments: o.attachments });
       if (opts.fail) throw opts.fail;
       return { conversationId: `conv-${calls.length}`, text: opts.reply ?? "You spent **€42**." };
     },
@@ -109,10 +116,13 @@ function expectTelegramHtml(html: string) {
   expect(text).not.toMatch(/&(?!(amp|lt|gt|quot);)/);
 }
 
-const balanceOf = (name: string) => listAccounts().find((a) => a.name === name)?.balanceCents;
+const balanceOf = (name: string) => listAccounts(uid).find((a) => a.name === name)?.balanceCents;
+
+let uid: string;
 
 beforeEach(() => {
-  setDbForTests(createDb(":memory:"));
+  uid = freshUser("Owner");
+  setSetting(uid, "currency", "EUR"); // the fixtures below were written in euros
   api = fakeApi();
   agent = fakeAgent();
   ctx = { api, allowedChatIds: [PRIMARY, SECONDARY], agent: agent.load, conversations: new Map(), log: () => {} };
@@ -145,38 +155,39 @@ describe("parsing", () => {
   });
 
   it("resolves the category from the longest leading words; the rest is the note", () => {
-    expect(resolveCategoryAndNote("groceries — lunch with Bob")).toMatchObject({
+    expect(resolveCategoryAndNote(uid, "groceries — lunch with Bob")).toMatchObject({
       category: { name: "Groceries" },
       note: "lunch with Bob",
     });
-    expect(resolveCategoryAndNote("restaurants dinner")).toMatchObject({
+    expect(resolveCategoryAndNote(uid, "restaurants dinner")).toMatchObject({
       category: { name: "Restaurants & bars" },
       note: "dinner",
     });
     // "the" appears inside "Other expenses" but doesn't start a word.
-    expect(resolveCategoryAndNote("the cinema").category).toBeUndefined();
+    expect(resolveCategoryAndNote(uid, "the cinema").category).toBeUndefined();
   });
 });
 
 describe("allowlist", () => {
-  it("answers /start from a stranger with their chat id only", async () => {
-    createAccount({ name: "Livret A", type: "savings", initialBalance: 1000 });
+  it("answers /start from a stranger with linking instructions only", async () => {
+    createAccount(uid, { name: "Livret A", type: "savings", initialBalance: 1000 });
     const replies = await say("/start", STRANGER);
     expect(replies).toHaveLength(1);
     expect(replies[0]).toContain(String(STRANGER));
-    expect(replies[0]).toContain("TELEGRAM_CHAT_ID");
+    expect(replies[0]).toContain("Settings → Telegram");
     expect(replies[0]).not.toContain("€");
+    expect((await say("/start NOTACODE", STRANGER))[0]).toContain("Settings → Telegram");
   });
 
   it("ignores everything else from strangers", async () => {
-    createAccount({ name: "Livret A", type: "savings", initialBalance: 1000 });
+    createAccount(uid, { name: "Livret A", type: "savings", initialBalance: 1000 });
     expect(await say("/networth", STRANGER)).toEqual([]);
     expect(await say("/balance livret 5", STRANGER)).toEqual([]);
     expect(await say("what's my net worth?", STRANGER)).toEqual([]);
     expect(balanceOf("Livret A")).toBe(100_000);
     expect(agent.calls).toHaveLength(0);
 
-    const r = createReminder({ title: "Pay rent", frequency: "monthly", dayOfMonth: 1, nagEveryHours: 2 });
+    const r = createReminder(uid, { title: "Pay rent", frequency: "monthly", dayOfMonth: 1, nagEveryHours: 2 });
     await handleUpdate(callbackUpdate(STRANGER, `done:${r.id}`), ctx);
     expect(api.answers).toHaveLength(0);
     expect(getReminder(r.id)?.acknowledgedAt).toBeNull();
@@ -185,17 +196,17 @@ describe("allowlist", () => {
 
 describe("/balance", () => {
   it("records the balance of the single matching account", async () => {
-    createAccount({ name: "Livret A", institution: "BoursoBank", type: "savings", initialBalance: 1000 });
-    createAccount({ name: "PEA", type: "pea", initialBalance: 5000 });
+    createAccount(uid, { name: "Livret A", institution: "BoursoBank", type: "savings", initialBalance: 1000 });
+    createAccount(uid, { name: "PEA", type: "pea", initialBalance: 5000 });
     const [reply] = await say("/balance livret 1 234,56");
     expect(balanceOf("Livret A")).toBe(123_456);
     expect(reply).toContain("€1,000.00 → <b>€1,234.56</b>");
-    expect(listAccounts().find((a) => a.name === "PEA")?.balanceCents).toBe(500_000);
+    expect(listAccounts(uid).find((a) => a.name === "PEA")?.balanceCents).toBe(500_000);
   });
 
   it("asks to be more specific when several accounts match", async () => {
-    createAccount({ name: "Livret A", type: "savings", initialBalance: 1000 });
-    createAccount({ name: "Livret Jeune", type: "savings", initialBalance: 200 });
+    createAccount(uid, { name: "Livret A", type: "savings", initialBalance: 1000 });
+    createAccount(uid, { name: "Livret Jeune", type: "savings", initialBalance: 200 });
     const [reply] = await say("/balance livret 500");
     expect(reply).toContain("Livret A");
     expect(reply).toContain("Livret Jeune");
@@ -205,7 +216,7 @@ describe("/balance", () => {
   });
 
   it("reports unknown accounts and bad usage", async () => {
-    createAccount({ name: "Livret A", type: "savings" });
+    createAccount(uid, { name: "Livret A", type: "savings" });
     expect((await say("/balance boursorama 10"))[0]).toContain("No account matches");
     expect((await say("/balance livret"))[0]).toContain("Usage");
   });
@@ -214,14 +225,14 @@ describe("/balance", () => {
 describe("/spent and /earned", () => {
   it("adds an expense in the matched category with a note", async () => {
     const [reply] = await say("/spent 12,50 groceries — lunch with Bob");
-    const [tx] = listTransactions().rows;
+    const [tx] = listTransactions(uid).rows;
     expect(tx).toMatchObject({ amountCents: -1250, categoryName: "Groceries", description: "lunch with Bob", source: "telegram" });
     expect(reply).toContain("€12.50");
   });
 
   it("falls back to uncategorized and says so", async () => {
     const [reply] = await say("/spent 5 zzzz");
-    const [tx] = listTransactions().rows;
+    const [tx] = listTransactions(uid).rows;
     expect(tx.amountCents).toBe(-500);
     expect(tx.categoryId).toBeNull();
     expect(reply).toContain("uncategorized");
@@ -229,14 +240,14 @@ describe("/spent and /earned", () => {
 
   it("adds income", async () => {
     await say("/earned 2 500 salary");
-    expect(listTransactions().rows[0]).toMatchObject({ amountCents: 250_000, categoryName: "Salary" });
+    expect(listTransactions(uid).rows[0]).toMatchObject({ amountCents: 250_000, categoryName: "Salary" });
   });
 });
 
 describe("reminder replies", () => {
   it("updates the linked account when replying with an amount", async () => {
-    const account = createAccount({ name: "Livret A", type: "savings", initialBalance: 1000 });
-    const r = createReminder({
+    const account = createAccount(uid, { name: "Livret A", type: "savings", initialBalance: 1000 });
+    const r = createReminder(uid, {
       title: "Update Livret A",
       kind: "balance_update",
       accountId: account.id,
@@ -258,7 +269,7 @@ describe("reminder replies", () => {
   });
 
   it("acknowledges a reminder without account and says noted", async () => {
-    const r = createReminder({ title: "Check savings", frequency: "monthly", dayOfMonth: 1, nagEveryHours: 4 });
+    const r = createReminder(uid, { title: "Check savings", frequency: "monthly", dayOfMonth: 1, nagEveryHours: 4 });
     markSent(r.id, 556, { nag: false });
     const [reply] = await say("300", PRIMARY, 556);
     expect(reply).toContain("Noted");
@@ -266,7 +277,7 @@ describe("reminder replies", () => {
   });
 
   it("sends other replies to the agent", async () => {
-    const r = createReminder({ title: "Check savings", frequency: "monthly", dayOfMonth: 1, nagEveryHours: 4 });
+    const r = createReminder(uid, { title: "Check savings", frequency: "monthly", dayOfMonth: 1, nagEveryHours: 4 });
     markSent(r.id, 557, { nag: false });
     await say("what should I check?", PRIMARY, 557);
     expect(agent.calls).toHaveLength(1);
@@ -276,7 +287,7 @@ describe("reminder replies", () => {
 
 describe("reminder buttons", () => {
   function sentReminder() {
-    const r = createReminder({ title: "Pay rent", frequency: "monthly", dayOfMonth: 1, nagEveryHours: 2 });
+    const r = createReminder(uid, { title: "Pay rent", frequency: "monthly", dayOfMonth: 1, nagEveryHours: 2 });
     markSent(r.id, 700, { nag: false });
     return r;
   }
@@ -310,7 +321,7 @@ describe("reminder buttons", () => {
 
 describe("scheduler", () => {
   it("sends due reminders once to every chat, then nags until done", async () => {
-    const r = createReminder({ title: "Pay rent", frequency: "weekly", dayOfWeek: 1, nagEveryHours: 2 });
+    const r = createReminder(uid, { title: "Pay rent", frequency: "weekly", dayOfWeek: 1, nagEveryHours: 2 });
     const due = new Date(r.nextRunAt!.getTime() + 60_000);
     const chats = [PRIMARY, SECONDARY];
     const quiet = () => {};
@@ -338,12 +349,12 @@ describe("scheduler", () => {
     expect(api.sent[2].text).toContain("Still pending");
     expect(getReminder(r.id)!.lastMessageId).toBe(api.sent[2].messageId);
 
-    acknowledgeReminder(r.id);
+    acknowledgeReminder(uid, r.id);
     expect(await tick(new Date(nagTime.getTime() + 5 * HOUR), api, chats, quiet)).toEqual({ sent: 0, nagged: 0, failed: 0 });
   });
 
   it("retries on the next tick when nothing could be delivered", async () => {
-    const r = createReminder({ title: "Pay rent", frequency: "weekly", dayOfWeek: 1 });
+    const r = createReminder(uid, { title: "Pay rent", frequency: "weekly", dayOfWeek: 1 });
     const due = new Date(r.nextRunAt!.getTime() + 60_000);
     expect(await tick(due, fakeApi({ failSend: true }), [PRIMARY], () => {})).toEqual({ sent: 0, nagged: 0, failed: 1 });
     expect(getReminder(r.id)!.lastSentAt).toBeNull();
@@ -353,44 +364,45 @@ describe("scheduler", () => {
 
 describe("rendering", () => {
   it("renders each reminder kind", () => {
-    const account = createAccount({ name: "Livret <A>", type: "savings", initialBalance: 1000 });
-    const balance = createReminder({ title: "Balances", kind: "balance_update", accountId: account.id, frequency: "monthly" });
+    const account = createAccount(uid, { name: "Livret <A>", type: "savings", initialBalance: 1000 });
+    const balance = createReminder(uid, { title: "Balances", kind: "balance_update", accountId: account.id, frequency: "monthly" });
     expect(renderReminder(balance)).toContain("Reply to this message");
     expect(renderReminder(balance)).toContain("Livret &lt;A&gt;");
 
     process.env.WALLET_PUBLIC_URL = "https://wallet.example.com/";
-    const statement = createReminder({ title: "Statement", kind: "statement", frequency: "monthly" });
-    expect(renderReminder(statement)).toContain('href="https://wallet.example.com/transactions/import"');
+    const statement = createReminder(uid, { title: "Statement", kind: "statement", frequency: "monthly" });
+    expect(renderReminder(statement)).toContain('href="https://wallet.example.com/assistant"');
+    expect(renderReminder(statement)).toContain("Send the CSV or PDF right here");
     delete process.env.WALLET_PUBLIC_URL;
 
-    const groceries = findCategory("groceries")!;
-    setBudget(groceries.id, 100);
-    const report = createReminder({ title: "Monthly report", kind: "monthly_report", frequency: "monthly" });
-    setBudget(findCategory("restaurants")!.id, 50);
-    addTransaction({ amount: -80, description: "Dinner", categoryId: findCategory("restaurants")!.id });
+    const groceries = findCategory(uid, "groceries")!;
+    setBudget(uid, groceries.id, 100);
+    const report = createReminder(uid, { title: "Monthly report", kind: "monthly_report", frequency: "monthly" });
+    setBudget(uid, findCategory(uid, "restaurants")!.id, 50);
+    addTransaction(uid, { amount: -80, description: "Dinner", categoryId: findCategory(uid, "restaurants")!.id });
     const text = renderReminder(report);
     expect(text).toContain("Net worth: €1,000");
     expect(text).toContain("1 month");
 
     for (const r of [balance, statement, report]) expectTelegramHtml(renderReminder(r));
-    expectTelegramHtml(renderReminders());
+    expectTelegramHtml(renderReminders(uid));
 
-    const custom = createReminder({ title: "Call the bank", message: "Ask about fees", frequency: "monthly" });
+    const custom = createReminder(uid, { title: "Call the bank", message: "Ask about fees", frequency: "monthly" });
     expect(renderReminder(custom, { nag: true })).toBe("🔁 Still pending: <b>Call the bank</b>\nAsk about fees");
   });
 
   it("renders /networth and /budget", async () => {
-    createAccount({ name: "Livret A", type: "savings", initialBalance: 1000 });
-    createAccount({ name: "PEA", type: "pea", initialBalance: 3000 });
+    createAccount(uid, { name: "Livret A", type: "savings", initialBalance: 1000 });
+    createAccount(uid, { name: "PEA", type: "pea", initialBalance: 3000 });
     const [nw] = await say("/nw");
     expect(nw).toContain("Net worth: €4,000");
     expect(nw).toContain("Investments: €3,000 · 75%");
     expect(nw).toContain("YTD");
     expectTelegramHtml(nw);
 
-    const groceries = findCategory("groceries")!;
-    setBudget(groceries.id, 500);
-    addTransaction({ amount: -600, description: "Big shop", categoryId: groceries.id });
+    const groceries = findCategory(uid, "groceries")!;
+    setBudget(uid, groceries.id, 500);
+    addTransaction(uid, { amount: -600, description: "Big shop", categoryId: groceries.id });
     const [budget] = await say("/budget");
     expect(budget).toContain("🔴 🛒 <b>Groceries</b>");
     expect(budget).toContain("▓▓▓▓▓▓▓▓ 120% · €600 / €500");
@@ -415,11 +427,12 @@ describe("agent", () => {
     await say("/ask and last month?");
     await say("/new");
     await say("hello again");
-    expect(agent.calls).toEqual([
+    expect(agent.calls.map(({ conversationId, message }) => ({ conversationId, message }))).toEqual([
       { conversationId: undefined, message: "how much did I spend?" },
       { conversationId: "conv-1", message: "and last month?" },
       { conversationId: undefined, message: "hello again" },
     ]);
+    expect(agent.calls.every((c) => c.userId === uid)).toBe(true);
   });
 
   it("replies with help when the agent is not ready", async () => {
@@ -438,9 +451,9 @@ describe("agent", () => {
 
 describe("/update walkthrough", () => {
   it("asks for each account, stalest first, then summarizes", async () => {
-    createAccount({ name: "Checking", type: "checking", initialBalance: 1_000 });
-    createAccount({ name: "PEA", type: "pea" }); // never updated → asked first
-    createAccount({
+    createAccount(uid, { name: "Checking", type: "checking", initialBalance: 1_000 });
+    createAccount(uid, { name: "PEA", type: "pea" }); // never updated → asked first
+    createAccount(uid, {
       name: "Mortgage",
       type: "mortgage",
       loanParams: { principal: 100_000, annualRatePct: 1, durationMonths: 120, startDate: "2026-01-05" },
@@ -451,7 +464,7 @@ describe("/update walkthrough", () => {
 
     await handleUpdate(textUpdate(PRIMARY, "12 500"), ctx);
     expect(api.sent.at(-1)!.text).toContain("2/2 · Checking");
-    expect(listAccounts().find((a) => a.name === "PEA")!.balanceCents).toBe(12_500_00);
+    expect(listAccounts(uid).find((a) => a.name === "PEA")!.balanceCents).toBe(12_500_00);
 
     await handleUpdate(textUpdate(PRIMARY, "what?"), ctx);
     expect(api.sent.at(-1)!.text).toMatch(/Send a number/);
@@ -466,8 +479,8 @@ describe("/update walkthrough", () => {
   });
 
   it("starts from a general balance reminder's button", async () => {
-    createAccount({ name: "Livret A", type: "savings" });
-    const r = createReminder({ title: "Update balances", kind: "balance_update", frequency: "monthly", dayOfMonth: 1 });
+    createAccount(uid, { name: "Livret A", type: "savings" });
+    const r = createReminder(uid, { title: "Update balances", kind: "balance_update", frequency: "monthly", dayOfMonth: 1 });
     const keyboard = (await import("@/server/telegram/messages")).reminderKeyboard(r);
     expect(keyboard.inline_keyboard[0][0].callback_data).toBe("walk:start");
     await handleUpdate(
@@ -477,5 +490,84 @@ describe("/update walkthrough", () => {
     expect(api.sent.at(-1)!.text).toContain("1/1 · Livret A");
     await handleUpdate(textUpdate(PRIMARY, "stop"), ctx);
     expect(api.sent.at(-1)!.text).toMatch(/0 updated/);
+  });
+});
+
+describe("linking chats to users", () => {
+  it("links a stranger's chat with a one-time code, scoped to that user", async () => {
+    const bob = createUser("Bob").id;
+    createAccount(bob, { name: "Bob's checking", type: "checking", initialBalance: 50 });
+    createAccount(uid, { name: "Owner savings", type: "savings", initialBalance: 9_000 });
+    const { code } = createTelegramLinkCode(bob);
+
+    const [linked] = await say(`/start ${code}`, STRANGER);
+    expect(linked).toContain("Bob");
+    // The code is single-use.
+    expect((await say(`/start ${code}`, 333))[0]).toContain("Settings → Telegram");
+
+    const [nw] = await say("/nw", STRANGER);
+    expect(nw).toContain("50");
+    expect(nw).not.toContain("9,000");
+    await say("/spent 4 coffee", STRANGER);
+    expect(listTransactions(bob).total).toBe(1);
+    expect(listTransactions(uid).total).toBe(0);
+
+    await say("how am I doing?", STRANGER);
+    expect(agent.calls.at(-1)!.userId).toBe(bob);
+  });
+
+  it("sends reminders to the owner's legacy chats and to each user's linked chat", async () => {
+    const bob = createUser("Bob").id;
+    const { code } = createTelegramLinkCode(bob);
+    await say(`/start ${code}`, STRANGER);
+    const mine = createReminder(uid, { title: "Owner rent", frequency: "weekly", dayOfWeek: 1 });
+    const his = createReminder(bob, { title: "Bob rent", frequency: "weekly", dayOfWeek: 1 });
+    const due = new Date(Math.max(mine.nextRunAt!.getTime(), his.nextRunAt!.getTime()) + 60_000);
+    const before = api.sent.length;
+    expect(await tick(due, api, [PRIMARY], () => {})).toEqual({ sent: 2, nagged: 0, failed: 0 });
+    const sent = api.sent.slice(before).map((m) => [m.chatId, m.text.includes("Owner") ? "owner" : "bob"]);
+    expect(sent).toEqual(expect.arrayContaining([[PRIMARY, "owner"], [STRANGER, "bob"]]));
+    expect(sent).toHaveLength(2);
+  });
+});
+
+describe("files", () => {
+  it("saves a sent document and hands it to the assistant", async () => {
+    await handleUpdate(
+      {
+        update_id: updateId++,
+        message: {
+          message_id: 42,
+          date: 0,
+          chat: { id: PRIMARY, type: "private" },
+          caption: "import into checking",
+          document: { file_id: "F1", file_unique_id: "u1", file_name: "october.csv", mime_type: "text/csv", file_size: 60 },
+        },
+      } as TgUpdate,
+      ctx,
+    );
+    const [upload] = listUploads(uid);
+    expect(upload.filename).toBe("october.csv");
+    expect(getUpload(uid, upload.id)!.data.toString()).toContain("Coffee (F1)");
+    expect(agent.calls.at(-1)).toMatchObject({ userId: uid, message: "import into checking", attachments: [upload.id] });
+    expect(api.sent.some((m) => m.text.includes("october.csv"))).toBe(true);
+  });
+
+  it("refuses unsupported file types without calling the assistant", async () => {
+    await handleUpdate(
+      {
+        update_id: updateId++,
+        message: {
+          message_id: 43,
+          date: 0,
+          chat: { id: PRIMARY, type: "private" },
+          document: { file_id: "F2", file_unique_id: "u2", file_name: "song.mp3", mime_type: "audio/mpeg" },
+        },
+      } as TgUpdate,
+      ctx,
+    );
+    expect(listUploads(uid)).toHaveLength(0);
+    expect(agent.calls).toHaveLength(0);
+    expect(api.sent.at(-1)!.text).toContain("CSV");
   });
 });

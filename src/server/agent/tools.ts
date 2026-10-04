@@ -547,7 +547,7 @@ export function present(value: unknown): unknown {
   if (typeof value !== "object") return value;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (v === undefined) continue;
+    if (v === undefined || k === "userId") continue; // always the caller: noise for the model
     if (k.endsWith("Cents") && k.length > 5) {
       const key = k.slice(0, -5);
       if (typeof v === "number") out[key] = v / 100;

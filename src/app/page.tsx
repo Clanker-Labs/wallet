@@ -37,12 +37,12 @@ export default async function Dashboard() {
               <ButtonLink href="/accounts?new=1" variant="primary">
                 Add your first account
               </ButtonLink>
-              <ButtonLink href="/transactions/import">Import a bank CSV</ButtonLink>
+              <ButtonLink href="/assistant">Import a statement</ButtonLink>
             </div>
           }
         >
-          Start by adding your accounts (bank, savings, PEA, property, mortgage…) with their current balance. Your net
-          worth builds up from there. Tip: <code>npm run db:seed-demo</code> loads demo data.
+          Add your accounts (checking, savings, brokerage, crypto, property, mortgage…) with their current balance, in any
+          currency. Or drop a bank or broker statement (CSV or PDF) anywhere on this page and the assistant fills things in.
         </EmptyState>
       </div>
     );
@@ -60,10 +60,10 @@ export default async function Dashboard() {
   return (
     <div className="space-y-5">
       {/* Hero */}
-      <Card className="p-6">
+      <Card className="bg-hero p-6">
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div>
-            <div className="text-sm text-muted">Net worth</div>
+            <div className="text-sm text-muted">Net worth · {nw.currency}</div>
             <div className="mt-1 text-5xl font-semibold tracking-tight">{f.money(nw.netCents, { whole: true })}</div>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
               {o.changes.map((c) => (

@@ -1,16 +1,20 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { freshDb } from "./helpers";
+import { freshUser } from "./helpers";
 import { createAccount } from "@/server/services/accounts";
 import { callTool, enabledTools, present, TOOLS } from "@/server/agent/tools";
 import { runAgent } from "@/server/agent/runner";
 import { appendMessage, createConversation, loadMessages, transcript } from "@/server/agent/conversations";
 import type { AgentEvent } from "@/server/agent/events";
 
+let uid: string;
+let ctx: { userId: string };
+
 beforeEach(() => {
   process.env.WALLET_TIMEZONE = "UTC";
-  freshDb();
+  uid = freshUser();
+  ctx = { userId: uid };
 });
 
 describe("tool layer", () => {
@@ -24,15 +28,15 @@ describe("tool layer", () => {
   });
 
   it("validates input and reports errors as tool errors", async () => {
-    const bad = await callTool("record_balance", { accountId: "nope" });
+    const bad = await callTool(ctx, "record_balance", { accountId: "nope" });
     expect(bad.ok).toBe(false);
     expect(bad.content).toMatch(/Invalid input/);
-    expect((await callTool("does_not_exist", {})).ok).toBe(false);
+    expect((await callTool(ctx, "does_not_exist", {})).ok).toBe(false);
   });
 
   it("converts cents to units for the model", async () => {
-    createAccount({ name: "Checking", type: "checking", initialBalance: 1234.5 });
-    const res = await callTool("get_net_worth", {});
+    createAccount(uid, { name: "Checking", type: "checking", initialBalance: 1234.5 });
+    const res = await callTool(ctx, "get_net_worth", {});
     const data = JSON.parse(res.content);
     expect(data.net).toBe(1234.5);
     expect(data.byClass.cash).toBe(1234.5);
@@ -44,16 +48,19 @@ describe("tool layer", () => {
   });
 
   it("only allows read-only SQL", async () => {
-    const ok = await callTool("query_sql", { sql: "SELECT count(*) AS n FROM categories" });
+    const ok = await callTool(ctx, "query_sql", { sql: "SELECT count(*) AS n FROM categories" });
     expect(JSON.parse(ok.content).rows[0].n).toBeGreaterThan(10);
+    for (const sql of ["SELECT * FROM sessions", "SELECT * FROM passkeys", "SELECT * FROM users"]) {
+      expect((await callTool(ctx, "query_sql", { sql })).ok, sql).toBe(false);
+    }
     for (const sql of ["DELETE FROM accounts", "UPDATE accounts SET name = 'x'", "SELECT 1; DROP TABLE accounts"]) {
-      expect((await callTool("query_sql", { sql })).ok, sql).toBe(false);
+      expect((await callTool(ctx, "query_sql", { sql })).ok, sql).toBe(false);
     }
   });
 
   it("fills projection defaults from the user's data", async () => {
-    createAccount({ name: "PEA", type: "pea", initialBalance: 50_000 });
-    const res = JSON.parse((await callTool("project_net_worth", { horizonYears: 5 })).content);
+    createAccount(uid, { name: "PEA", type: "pea", initialBalance: 50_000 });
+    const res = JSON.parse((await callTool(ctx, "project_net_worth", { horizonYears: 5 })).content);
     expect(res.assumptions.startingNetWorth).toBe(50_000);
     expect(res.assumptions.annualReturnPct).toBe(6);
     expect(res.result.yearly).toHaveLength(6);
@@ -127,13 +134,13 @@ describe("Claude API agent loop", () => {
   });
 
   it("runs tools, appends history and streams events", async () => {
-    createAccount({ name: "Checking", type: "checking", initialBalance: 5_000 });
+    createAccount(uid, { name: "Checking", type: "checking", initialBalance: 5_000 });
     script = [
       { blocks: [{ type: "text", text: "Checking…" }, { type: "tool_use", id: "toolu_1", name: "get_overview", input: {} }], stop: "tool_use" },
       { blocks: [{ type: "text", text: "Your net worth is €5,000." }], stop: "end_turn" },
     ];
     const events: AgentEvent[] = [];
-    const res = await runAgent({ message: "What's my net worth?", channel: "web", onEvent: (e) => events.push(e) });
+    const res = await runAgent({ userId: uid, message: "What's my net worth?", channel: "web", onEvent: (e) => events.push(e) });
 
     expect(res.text).toBe("Your net worth is €5,000.");
     expect(events.map((e) => e.type)).toEqual(
@@ -161,18 +168,18 @@ describe("Claude API agent loop", () => {
 
     // Follow-up turn: history is append-only (the earlier messages are replayed unchanged).
     script = [{ blocks: [{ type: "text", text: "Still €5,000." }], stop: "end_turn" }];
-    await runAgent({ conversationId: res.conversationId, message: "And now?", channel: "web" });
+    await runAgent({ userId: uid, conversationId: res.conversationId, message: "And now?", channel: "web" });
     const replay = requests[2].body.messages as unknown[];
     expect(replay.slice(0, 3)).toEqual(msgs);
     expect(transcript(res.conversationId).map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
   });
 
   it("answers a dangling tool call left by a crash before continuing", async () => {
-    const conv = createConversation({ channel: "web", provider: "anthropic", title: "t" });
+    const conv = createConversation({ userId: uid, channel: "web", provider: "anthropic", title: "t" });
     appendMessage(conv.id, { role: "user", content: [{ type: "text", text: "hi" }] });
     appendMessage(conv.id, { role: "assistant", content: [{ type: "tool_use", id: "toolu_dead", name: "get_overview", input: {} }] });
     script = [{ blocks: [{ type: "text", text: "ok" }], stop: "end_turn" }];
-    await runAgent({ conversationId: conv.id, message: "again", channel: "web" });
+    await runAgent({ userId: uid, conversationId: conv.id, message: "again", channel: "web" });
     const roles = loadMessages(conv.id).map((m) => m.role);
     expect(roles).toEqual(["user", "assistant", "user", "user", "assistant"]);
     const repaired = loadMessages(conv.id)[2].content as { type: string; is_error?: boolean }[];
@@ -181,6 +188,6 @@ describe("Claude API agent loop", () => {
 
   it("surfaces refusals without storing the refused turn", async () => {
     script = [{ blocks: [], stop: "refusal" }];
-    await expect(runAgent({ message: "something", channel: "web" })).rejects.toThrow(/declined/);
+    await expect(runAgent({ userId: uid, message: "something", channel: "web" })).rejects.toThrow(/declined/);
   });
 });

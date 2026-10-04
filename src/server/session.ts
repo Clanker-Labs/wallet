@@ -3,7 +3,7 @@ import { cache } from "react";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { User } from "@/server/db/schema";
-import { apiTokenEnabled, SESSION_COOKIE, validBearer } from "@/server/auth";
+import { apiTokenEnabled, SESSION_COOKIE, tokenlessAccess, validBearer } from "@/server/auth";
 import { countUsers, createSession, defaultUser, deleteSession, userForSession } from "@/server/services/users";
 
 /** The signed-in user for this request (cached per request). */
@@ -31,7 +31,9 @@ export async function requireUid(): Promise<string> {
 export async function apiUser(request: Request): Promise<User | null> {
   const user = await currentUser();
   if (user) return user;
-  const authorized = apiTokenEnabled() ? validBearer(request.headers.get("authorization")) : true;
+  const authorized = apiTokenEnabled()
+    ? validBearer(request.headers.get("authorization"))
+    : tokenlessAccess(request.headers).ok;
   if (!authorized || countUsers() === 0) return null;
   try {
     return defaultUser();

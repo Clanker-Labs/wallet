@@ -21,7 +21,7 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
 
 export function Card({ className, children, ...rest }: ComponentProps<"section">) {
   return (
-    <section className={clsx("rounded-2xl border border-border bg-surface p-5", className)} {...rest}>
+    <section className={clsx("rounded-2xl border border-border bg-surface p-5 shadow-card", className)} {...rest}>
       {children}
     </section>
   );

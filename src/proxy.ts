@@ -1,12 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, apiTokenEnabled, validBearer } from "@/server/auth";
+import { SESSION_COOKIE, apiTokenEnabled, tokenlessAccess, validBearer } from "@/server/auth";
 
 const PUBLIC_PAGES = ["/login", "/signup"];
 
 /**
  * Optimistic gate (runs on the Node.js runtime): pages need a session cookie,
- * programmatic API calls need the bearer token only when WALLET_API_TOKEN is
- * set. Pages and route handlers re-check the session against the database.
+ * programmatic API calls need the bearer token when WALLET_API_TOKEN is set,
+ * or else must come from this machine (see tokenlessAccess). Pages and route
+ * handlers re-check the session against the database.
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -14,8 +15,14 @@ export function proxy(request: NextRequest) {
 
   if (pathname.startsWith("/api/")) {
     if (pathname.startsWith("/api/auth/") || pathname === "/api/health") return NextResponse.next();
-    if (!apiTokenEnabled() || hasSession || validBearer(request.headers.get("authorization"))) return NextResponse.next();
-    return NextResponse.json({ error: "Unauthorized: send Authorization: Bearer $WALLET_API_TOKEN" }, { status: 401 });
+    if (hasSession) return NextResponse.next(); // verified against the DB by the route
+    if (apiTokenEnabled()) {
+      if (validBearer(request.headers.get("authorization"))) return NextResponse.next();
+      return NextResponse.json({ error: "Unauthorized: send Authorization: Bearer $WALLET_API_TOKEN" }, { status: 401 });
+    }
+    const local = tokenlessAccess(request.headers);
+    if (local.ok) return NextResponse.next();
+    return NextResponse.json({ error: local.reason }, { status: 403 });
   }
 
   if (hasSession || PUBLIC_PAGES.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return NextResponse.next();

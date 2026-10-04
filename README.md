@@ -146,6 +146,7 @@ The worker also refreshes FX rates and market prices every hour. `npm run worker
 npm test            # vitest: finance math, services, multi-user isolation, FX, holdings, passkeys (software authenticator), Telegram bot, agent loop
 npm run typecheck
 npm run db:generate # after editing src/server/db/schema.ts
+node scripts/demo/sections/net-worth.mjs   # record a demo clip (see scripts/demo/README.md)
 ```
 
 ```

@@ -4,7 +4,9 @@ import { db } from "@/server/db/client";
 import { budgets, categories, transactions } from "@/server/db/schema";
 import { addMonths, monthBounds, monthRange } from "@/lib/dates";
 import { toCents } from "@/lib/money";
-import { today } from "./settings";
+import { requireCategory } from "./categories";
+import { fxConverter } from "./fx";
+import { getSettings, today } from "./settings";
 
 export type BudgetLineStatus = "ok" | "ahead_of_pace" | "over" | "unbudgeted";
 
@@ -21,6 +23,7 @@ export interface BudgetLine {
 
 export interface BudgetStatus {
   month: string;
+  currency: string;
   /** Fraction of the month elapsed (1 for past months). */
   elapsed: number;
   incomeCents: number;
@@ -32,7 +35,7 @@ export interface BudgetStatus {
   lines: BudgetLine[];
 }
 
-export function listBudgets() {
+export function listBudgets(uid: string) {
   return db()
     .select({
       id: budgets.id,
@@ -43,18 +46,20 @@ export function listBudgets() {
     })
     .from(budgets)
     .innerJoin(categories, eq(categories.id, budgets.categoryId))
+    .where(eq(budgets.userId, uid))
     .all();
 }
 
-/** Set a monthly budget for a category. 0 or null removes it. */
-export function setBudget(categoryId: number, amount: number | null) {
+/** Set a monthly budget (base currency) for a category. 0 or null removes it. */
+export function setBudget(uid: string, categoryId: number, amount: number | null) {
+  requireCategory(uid, categoryId);
   if (!amount || amount <= 0) {
     db().delete(budgets).where(eq(budgets.categoryId, categoryId)).run();
     return null;
   }
   return db()
     .insert(budgets)
-    .values({ categoryId, amountCents: toCents(amount) })
+    .values({ userId: uid, categoryId, amountCents: toCents(amount) })
     .onConflictDoUpdate({ target: budgets.categoryId, set: { amountCents: toCents(amount) } })
     .returning()
     .get();
@@ -70,9 +75,17 @@ interface CategoryTotal {
   count: number;
 }
 
-function totalsByCategory(from: string, to: string): CategoryTotal[] {
-  return db()
+/**
+ * Money in / out per category (and month), converted to the user's base
+ * currency at each transaction's date.
+ */
+function categoryTotals(uid: string, from: string, to: string): (CategoryTotal & { month: string })[] {
+  const base = getSettings(uid).currency;
+  const fx = fxConverter();
+  const rows = db()
     .select({
+      date: transactions.date,
+      currency: transactions.currency,
       categoryId: transactions.categoryId,
       kind: categories.kind,
       name: categories.name,
@@ -83,9 +96,33 @@ function totalsByCategory(from: string, to: string): CategoryTotal[] {
     })
     .from(transactions)
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
-    .where(and(gte(transactions.date, from), lte(transactions.date, to)))
-    .groupBy(transactions.categoryId)
+    .where(and(eq(transactions.userId, uid), gte(transactions.date, from), lte(transactions.date, to)))
+    .groupBy(transactions.categoryId, transactions.currency, transactions.date)
     .all();
+  const merged = new Map<string, CategoryTotal & { month: string }>();
+  for (const r of rows) {
+    const month = r.date.slice(0, 7);
+    const key = `${month}|${r.categoryId ?? "none"}`;
+    const acc = merged.get(key) ?? { month, categoryId: r.categoryId, kind: r.kind, name: r.name, icon: r.icon, inCents: 0, outCents: 0, count: 0 };
+    acc.inCents += fx.convertCents(r.inCents, r.currency, base, r.date);
+    acc.outCents += fx.convertCents(r.outCents, r.currency, base, r.date);
+    acc.count += r.count;
+    merged.set(key, acc);
+  }
+  return [...merged.values()];
+}
+
+/** Per-category totals over a range (months merged). */
+function totalsByCategory(uid: string, from: string, to: string): CategoryTotal[] {
+  const merged = new Map<number | null, CategoryTotal>();
+  for (const r of categoryTotals(uid, from, to)) {
+    const acc = merged.get(r.categoryId) ?? { ...r, inCents: 0, outCents: 0, count: 0 };
+    acc.inCents += r.inCents;
+    acc.outCents += r.outCents;
+    acc.count += r.count;
+    merged.set(r.categoryId, acc);
+  }
+  return [...merged.values()];
 }
 
 /**
@@ -112,16 +149,16 @@ function summarize(rows: Omit<CategoryTotal, "count">[]) {
   return { income, expenses, spentByCategory };
 }
 
-export function budgetStatus(month = today().slice(0, 7)): BudgetStatus {
+export function budgetStatus(uid: string, month = today(uid).slice(0, 7)): BudgetStatus {
   const { start, end } = monthBounds(month);
-  const t = today();
+  const t = today(uid);
   const daysInMonth = DateTime.fromISO(start).daysInMonth ?? 30;
   const elapsed =
     t > end ? 1 : t < start ? 0 : DateTime.fromISO(t).day / daysInMonth;
 
-  const rows = totalsByCategory(start, end);
+  const rows = totalsByCategory(uid, start, end);
   const { income, expenses, spentByCategory } = summarize(rows);
-  const budgetRows = listBudgets();
+  const budgetRows = listBudgets(uid);
   const meta = new Map(rows.map((r) => [r.categoryId, r]));
 
   const lines: BudgetLine[] = [];
@@ -167,6 +204,7 @@ export function budgetStatus(month = today().slice(0, 7)): BudgetStatus {
     .reduce((s, l) => s + l.spentCents, 0);
   return {
     month,
+    currency: getSettings(uid).currency,
     elapsed,
     incomeCents: income,
     expensesCents: expenses,
@@ -186,27 +224,11 @@ export interface CashflowMonth {
   savingsRatePct: number | null;
 }
 
-/** Income vs expenses per month, oldest first, including the current month. */
-export function cashflow(months = 12): CashflowMonth[] {
-  const thisMonth = today().slice(0, 7);
+/** Income vs expenses per month (base currency), oldest first, including the current month. */
+export function cashflow(uid: string, months = 12): CashflowMonth[] {
+  const thisMonth = today(uid).slice(0, 7);
   const list = monthRange(addMonths(thisMonth, -(months - 1)), thisMonth);
-  const from = monthBounds(list[0]).start;
-  const to = monthBounds(thisMonth).end;
-  const rows = db()
-    .select({
-      month: sql<string>`substr(${transactions.date}, 1, 7)`,
-      categoryId: transactions.categoryId,
-      kind: categories.kind,
-      name: categories.name,
-      icon: categories.icon,
-      inCents: sql<number>`coalesce(sum(case when ${transactions.amountCents} > 0 then ${transactions.amountCents} else 0 end), 0)`,
-      outCents: sql<number>`coalesce(sum(case when ${transactions.amountCents} < 0 then -${transactions.amountCents} else 0 end), 0)`,
-    })
-    .from(transactions)
-    .leftJoin(categories, eq(categories.id, transactions.categoryId))
-    .where(and(gte(transactions.date, from), lte(transactions.date, to)))
-    .groupBy(sql`substr(${transactions.date}, 1, 7)`, transactions.categoryId)
-    .all();
+  const rows = categoryTotals(uid, monthBounds(list[0]).start, monthBounds(thisMonth).end);
   return list.map((month) => {
     const { income, expenses } = summarize(rows.filter((r) => r.month === month));
     return {
@@ -220,8 +242,8 @@ export function cashflow(months = 12): CashflowMonth[] {
 }
 
 /** Spending per expense category over a date range, largest first. */
-export function spendingByCategory(from: string, to: string) {
-  const rows = totalsByCategory(from, to);
+export function spendingByCategory(uid: string, from: string, to: string) {
+  const rows = totalsByCategory(uid, from, to);
   const { spentByCategory } = summarize(rows);
   const meta = new Map(rows.map((r) => [r.categoryId, r]));
   const total = [...spentByCategory.values()].reduce((a, b) => a + Math.max(0, b), 0);
@@ -238,8 +260,11 @@ export function spendingByCategory(from: string, to: string) {
 }
 
 /** Average monthly net savings over the last `months` complete months. */
-export function averageMonthlySavings(months = 6): { netCents: number; incomeCents: number; expensesCents: number; monthsWithData: number } {
-  const flows = cashflow(months + 1).slice(0, -1).filter((m) => m.incomeCents || m.expensesCents);
+export function averageMonthlySavings(
+  uid: string,
+  months = 6,
+): { netCents: number; incomeCents: number; expensesCents: number; monthsWithData: number } {
+  const flows = cashflow(uid, months + 1).slice(0, -1).filter((m) => m.incomeCents || m.expensesCents);
   if (!flows.length) return { netCents: 0, incomeCents: 0, expensesCents: 0, monthsWithData: 0 };
   const avg = (f: (m: CashflowMonth) => number) => Math.round(flows.reduce((s, m) => s + f(m), 0) / flows.length);
   return {

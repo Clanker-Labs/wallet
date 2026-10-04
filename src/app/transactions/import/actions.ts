@@ -6,6 +6,7 @@ import { z } from "zod";
 import { applyMapping, parseCsv, type CsvMapping } from "@/lib/csv-import";
 import { countUncategorized, importTransactions } from "@/server/services/transactions";
 import { getAccountRow } from "@/server/services/accounts";
+import { requireUid } from "@/server/session";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -39,6 +40,7 @@ export type ImportResult =
  * here: the browser preview is never trusted.
  */
 export async function importCsvAction(fd: FormData): Promise<ImportResult> {
+  const uid = await requireUid();
   const file = fd.get("csv");
   if (!(file instanceof Blob)) return { ok: false, error: "No file received." };
 
@@ -67,7 +69,7 @@ export async function importCsvAction(fd: FormData): Promise<ImportResult> {
     const n = Number(rawAccount);
     try {
       if (!Number.isInteger(n)) throw new Error();
-      getAccountRow(n);
+      getAccountRow(uid, n);
     } catch {
       return { ok: false, error: "That account doesn't exist anymore." };
     }
@@ -81,7 +83,7 @@ export async function importCsvAction(fd: FormData): Promise<ImportResult> {
   const { ok, errors } = applyMapping(parsed.rows, mapping);
   if (ok.length === 0) return { ok: false, error: "No readable rows with this column mapping." };
 
-  const res = importTransactions(ok, accountId);
+  const res = importTransactions(uid, ok, accountId);
   revalidatePath("/", "layout");
-  return { ok: true, ...res, skipped: errors.length, uncategorized: countUncategorized() };
+  return { ok: true, ...res, skipped: errors.length, uncategorized: countUncategorized(uid) };
 }

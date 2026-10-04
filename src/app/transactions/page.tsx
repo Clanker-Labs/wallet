@@ -9,6 +9,7 @@ import { ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
 import { ConfirmButton } from "@/components/accounts-ui";
 import { CategorizeProgress, CategoryCell, QuickAdd, TxFilters, TxProvider, type TxFilterValues } from "@/components/transactions-ui";
 import { deleteTransactionAction } from "./actions";
+import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Transactions" };
@@ -36,6 +37,7 @@ function rulePattern(description: string): string | null {
 }
 
 export default async function TransactionsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const uid = (await requireUser()).id;
   const sp = await searchParams;
   const from = one(sp.from);
   const to = one(sp.to);
@@ -56,22 +58,22 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
     accountId: filters.account ? Number(filters.account) : undefined,
     search: filters.q,
   };
-  let { rows, total } = listTransactions({ ...query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+  let { rows, total } = listTransactions(uid, { ...query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
   if (rows.length === 0 && total > 0) {
     // Past the last page (e.g. after categorizing in the "Uncategorized" view): show the last one.
     page = Math.ceil(total / PAGE_SIZE);
-    ({ rows, total } = listTransactions({ ...query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }));
+    ({ rows, total } = listTransactions(uid, { ...query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }));
   }
-  const totals = transactionTotals(query);
-  const uncategorized = countUncategorized();
-  const categories = listCategories().map((c) => ({ id: c.id, name: c.name, icon: c.icon, kind: c.kind }));
-  const allAccounts = listAccounts({ includeArchived: true });
+  const totals = transactionTotals(uid, query);
+  const uncategorized = countUncategorized(uid);
+  const categories = listCategories(uid).map((c) => ({ id: c.id, name: c.name, icon: c.icon, kind: c.kind }));
+  const allAccounts = listAccounts(uid, { includeArchived: true });
   const activeAccounts = allAccounts.filter((a) => !a.archivedAt);
   const defaultAccount = activeAccounts.find((a) => a.type === "checking") ?? null;
-  const t = today();
-  const first = firstTransactionMonth();
+  const t = today(uid);
+  const first = firstTransactionMonth(uid);
   const months = first ? monthRange(first, currentMonth()).reverse() : [];
-  const f = serverFormat();
+  const f = serverFormat(uid);
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageHref = (p: number) => {

@@ -10,6 +10,7 @@ import { formatMoney } from "@/lib/money";
 import { escapeHtml as esc } from "./api";
 
 interface Walkthrough {
+  uid: string;
   queue: number[];
   total: number;
   updated: number;
@@ -24,9 +25,9 @@ const sessions = new Map<number, Walkthrough>();
 const SKIP = /^(skip|next|pass|s|-)$/i;
 const STOP = /^(stop|cancel|quit|done|fin)$/i;
 
-function money(cents: number, signed = false) {
-  const { currency, locale } = getSettings();
-  return formatMoney(cents, { currency, locale, signed });
+function money(uid: string, cents: number, opts: { signed?: boolean; currency?: string } = {}) {
+  const { currency, locale } = getSettings(uid);
+  return formatMoney(cents, { currency: opts.currency ?? currency, locale, signed: opts.signed });
 }
 
 export function isWalking(chatId: number, now = Date.now()): boolean {
@@ -36,11 +37,11 @@ export function isWalking(chatId: number, now = Date.now()): boolean {
 }
 
 function prompt(s: Walkthrough): string {
-  const { account } = getAccount(s.queue[0]);
-  const { locale } = getSettings();
+  const { account } = getAccount(s.uid, s.queue[0]);
+  const { locale } = getSettings(s.uid);
   const step = s.total - s.queue.length + 1;
   const last = account.lastUpdated
-    ? `Last: ${money(account.balanceCents)} · ${formatDate(account.lastUpdated, locale)}`
+    ? `Last: ${money(s.uid, account.balanceCents, { currency: account.currency })} · ${formatDate(account.lastUpdated, locale)}`
     : "No balance yet";
   return [
     `✏️ <b>${step}/${s.total} · ${esc(account.name)}</b>${account.institution ? ` (${esc(account.institution)})` : ""}`,
@@ -50,25 +51,26 @@ function prompt(s: Walkthrough): string {
 }
 
 function summary(s: Walkthrough): string {
-  const now = netWorthOn().netCents;
+  const now = netWorthOn(s.uid).netCents;
   return [
     `✅ Done — ${s.updated} updated, ${s.skipped} skipped.`,
-    `🏦 Net worth: <b>${money(now)}</b> (${money(now - s.startNetCents, true)})`,
+    `🏦 Net worth: <b>${money(s.uid, now)}</b> (${money(s.uid, now - s.startNetCents, { signed: true })})`,
   ].join("\n");
 }
 
 /** Start a walkthrough; returns the first prompt. */
-export function startWalkthrough(chatId: number, now = Date.now()): string {
-  const accounts = listAccounts()
-    .filter((a) => !a.derivedFromLoan && a.includeInNetWorth)
+export function startWalkthrough(uid: string, chatId: number, now = Date.now()): string {
+  const accounts = listAccounts(uid)
+    .filter((a) => !a.derivedFromLoan && !a.valuedByHoldings && a.includeInNetWorth)
     .sort((a, b) => (a.lastUpdated ?? "").localeCompare(b.lastUpdated ?? ""));
   if (!accounts.length) return "🤷 No accounts to update yet — add them in the web app.";
   const s: Walkthrough = {
+    uid,
     queue: accounts.map((a) => a.id),
     total: accounts.length,
     updated: 0,
     skipped: 0,
-    startNetCents: netWorthOn().netCents,
+    startNetCents: netWorthOn(uid).netCents,
     touchedAt: now,
   };
   sessions.set(chatId, s);
@@ -79,9 +81,9 @@ export function startWalkthrough(chatId: number, now = Date.now()): string {
  * Feed an answer to the active walkthrough. `amount` is the parsed number, if
  * the text was one. Returns the reply to send.
  */
-export function answerWalkthrough(chatId: number, text: string, amount: number | null, now = Date.now()): string {
+export function answerWalkthrough(uid: string, chatId: number, text: string, amount: number | null, now = Date.now()): string {
   const s = sessions.get(chatId);
-  if (!s) return startWalkthrough(chatId, now);
+  if (!s || s.uid !== uid) return startWalkthrough(uid, chatId, now);
   s.touchedAt = now;
   const t = text.trim();
   let ack = "";
@@ -92,10 +94,11 @@ export function answerWalkthrough(chatId: number, text: string, amount: number |
     s.skipped++;
   } else if (amount !== null) {
     const id = s.queue[0];
-    const before = getAccount(id).account.balanceCents;
-    const { balanceCents } = recordBalance({ accountId: id, balance: amount, source: "telegram" });
+    const before = getAccount(uid, id).account;
+    const { balanceCents } = recordBalance(uid, { accountId: id, balance: amount, source: "telegram" });
     s.updated++;
-    ack = `👍 ${money(balanceCents)} (${money(balanceCents - before, true)})\n\n`;
+    const fmt = { currency: before.currency };
+    ack = `👍 ${money(uid, balanceCents, fmt)} (${money(uid, balanceCents - before.balanceCents, { ...fmt, signed: true })})\n\n`;
   } else {
     return "🔢 Send a number (e.g. 12 500), <i>skip</i> or <i>stop</i>.";
   }

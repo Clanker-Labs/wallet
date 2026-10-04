@@ -170,6 +170,7 @@ export const CLASS_ASSUMPTIONS: Record<string, { returnPct: number; volatilityPc
   retirement: { returnPct: 5, volatilityPct: 12 },
   real_estate: { returnPct: 2.5, volatilityPct: 6 },
   crypto: { returnPct: 8, volatilityPct: 60 },
+  commodities: { returnPct: 3, volatilityPct: 15 },
   other: { returnPct: 0, volatilityPct: 5 },
 };
 

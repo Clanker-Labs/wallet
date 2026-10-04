@@ -7,6 +7,7 @@ import { Badge, ButtonLink, Card, CardHeader, EmptyState, PageHeader } from "@/c
 import { ReminderForm } from "@/components/reminders-form";
 import { KIND_LABELS, type ReminderKind, type ReminderValues } from "@/components/reminders-model";
 import { ReminderRowActions } from "@/components/reminders-actions";
+import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Reminders" };
@@ -21,10 +22,11 @@ const COMMANDS: [string, string][] = [
 ];
 
 export default async function RemindersPage({ searchParams }: { searchParams: Promise<{ edit?: string; saved?: string }> }) {
+  const uid = (await requireUser()).id;
   const sp = await searchParams;
-  const { timezone, locale } = getSettings();
-  const reminders = listReminders();
-  const accounts = listAccounts().map((a) => ({ id: a.id, name: a.name }));
+  const { timezone, locale } = getSettings(uid);
+  const reminders = listReminders(uid);
+  const accounts = listAccounts(uid).map((a) => ({ id: a.id, name: a.name }));
 
   const editId = Number(sp.edit);
   const editRow = Number.isInteger(editId) ? reminders.find((r) => r.id === editId) : undefined;

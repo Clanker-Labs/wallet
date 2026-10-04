@@ -9,38 +9,60 @@ export const categoryInputSchema = z.object({
   icon: z.string().max(8).nullish(),
 });
 
-export function listCategories(): Category[] {
-  return db().select().from(categories).orderBy(asc(categories.sortOrder), asc(categories.name)).all();
+export function listCategories(uid: string): Category[] {
+  return db()
+    .select()
+    .from(categories)
+    .where(eq(categories.userId, uid))
+    .orderBy(asc(categories.sortOrder), asc(categories.name))
+    .all();
 }
 
-export function getCategory(id: number): Category | undefined {
-  return db().select().from(categories).where(eq(categories.id, id)).get();
+export function getCategory(uid: string, id: number): Category | undefined {
+  return db()
+    .select()
+    .from(categories)
+    .where(and(eq(categories.id, id), eq(categories.userId, uid)))
+    .get();
 }
 
-export function createCategory(raw: z.input<typeof categoryInputSchema>): Category {
+/** A category of this user, or an error. */
+export function requireCategory(uid: string, id: number): Category {
+  const c = getCategory(uid, id);
+  if (!c) throw new Error(`Category ${id} not found`);
+  return c;
+}
+
+export function createCategory(uid: string, raw: z.input<typeof categoryInputSchema>): Category {
   const input = categoryInputSchema.parse(raw);
-  const max = db().select({ m: sql<number>`coalesce(max(${categories.sortOrder}), 0)` }).from(categories).get();
+  const max = db()
+    .select({ m: sql<number>`coalesce(max(${categories.sortOrder}), 0)` })
+    .from(categories)
+    .where(eq(categories.userId, uid))
+    .get();
   return db()
     .insert(categories)
-    .values({ ...input, icon: input.icon ?? null, sortOrder: (max?.m ?? 0) + 1 })
+    .values({ ...input, userId: uid, icon: input.icon ?? null, sortOrder: (max?.m ?? 0) + 1 })
     .returning()
     .get();
 }
 
-export function updateCategory(id: number, raw: Partial<z.input<typeof categoryInputSchema>>) {
+export function updateCategory(uid: string, id: number, raw: Partial<z.input<typeof categoryInputSchema>>) {
+  requireCategory(uid, id);
   const input = categoryInputSchema.partial().parse(raw);
   return db().update(categories).set(input).where(eq(categories.id, id)).returning().get();
 }
 
-export function deleteCategory(id: number) {
+export function deleteCategory(uid: string, id: number) {
+  requireCategory(uid, id);
   db().delete(categories).where(eq(categories.id, id)).run();
 }
 
 /** Resolve a category from free text (name, case-insensitive, prefix/substring). */
-export function findCategory(query: string): Category | undefined {
+export function findCategory(uid: string, query: string): Category | undefined {
   const q = query.trim().toLowerCase();
   if (!q) return undefined;
-  const all = listCategories();
+  const all = listCategories(uid);
   return (
     all.find((c) => c.name.toLowerCase() === q) ??
     all.find((c) => c.name.toLowerCase().startsWith(q)) ??
@@ -50,7 +72,7 @@ export function findCategory(query: string): Category | undefined {
 
 // ── Rules ────────────────────────────────────────────────────────────────
 
-export function listRules() {
+export function listRules(uid: string) {
   return db()
     .select({
       id: categoryRules.id,
@@ -60,6 +82,7 @@ export function listRules() {
     })
     .from(categoryRules)
     .innerJoin(categories, eq(categories.id, categoryRules.categoryId))
+    .where(eq(categoryRules.userId, uid))
     .orderBy(asc(categoryRules.pattern))
     .all();
 }
@@ -68,26 +91,27 @@ export function normalizePattern(p: string) {
   return p.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-export function upsertRule(pattern: string, categoryId: number) {
+export function upsertRule(uid: string, pattern: string, categoryId: number) {
+  requireCategory(uid, categoryId);
   const p = normalizePattern(pattern);
   if (p.length < 2) throw new Error("Rule pattern must be at least 2 characters");
   db()
     .insert(categoryRules)
-    .values({ pattern: p, categoryId })
-    .onConflictDoUpdate({ target: categoryRules.pattern, set: { categoryId } })
+    .values({ userId: uid, pattern: p, categoryId })
+    .onConflictDoUpdate({ target: [categoryRules.userId, categoryRules.pattern], set: { categoryId } })
     .run();
 }
 
-export function deleteRule(id: number) {
-  db().delete(categoryRules).where(eq(categoryRules.id, id)).run();
+export function deleteRule(uid: string, id: number) {
+  db()
+    .delete(categoryRules)
+    .where(and(eq(categoryRules.id, id), eq(categoryRules.userId, uid)))
+    .run();
 }
 
 /** Longest matching pattern wins ("carrefour city" beats "carrefour"). */
-export function matchCategory(
-  description: string,
-  rules: { pattern: string; categoryId: number }[] = listRules(),
-): number | null {
-  const d = description.toLowerCase().replace(/\s+/g, " ");
+export function matchCategory(description: string, rules: { pattern: string; categoryId: number }[]): number | null {
+  const d = normalizePattern(description);
   let best: { len: number; id: number } | null = null;
   for (const r of rules) {
     if (d.includes(r.pattern) && (!best || r.pattern.length > best.len)) best = { len: r.pattern.length, id: r.categoryId };
@@ -96,13 +120,13 @@ export function matchCategory(
 }
 
 /** Categorize every uncategorized transaction a rule matches. Returns how many changed. */
-export function applyRulesToUncategorized(): number {
-  const rules = listRules();
+export function applyRulesToUncategorized(uid: string): number {
+  const rules = listRules(uid);
   if (!rules.length) return 0;
   const rows = db()
     .select({ id: transactions.id, description: transactions.description })
     .from(transactions)
-    .where(and(isNull(transactions.categoryId)))
+    .where(and(eq(transactions.userId, uid), isNull(transactions.categoryId)))
     .all();
   let changed = 0;
   const stmt = db().$client.prepare("UPDATE transactions SET category_id = ? WHERE id = ?");
@@ -125,7 +149,7 @@ export function applyRulesToUncategorized(): number {
 export function suggestPattern(description: string): string {
   const cleaned = description
     .toLowerCase()
-    .replace(/\b(cb|carte|prlv|prelevement|prélèvement|vir|virement|sepa|paiement|achat|card|pos|debit|fact)\b/g, " ")
+    .replace(/\b(cb|carte|prlv|prelevement|prélèvement|vir|virement|sepa|paiement|achat|card|pos|debit|fact|purchase|ach)\b/g, " ")
     .replace(/\b\d{1,2}[/.-]\d{1,2}([/.-]\d{2,4})?\b/g, " ")
     .replace(/[*#]/g, " ")
     .replace(/\b\d+\b/g, " ")

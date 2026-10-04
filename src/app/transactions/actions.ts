@@ -6,6 +6,7 @@ import { addTransaction, categorizeTransactions, deleteTransaction } from "@/ser
 import { getCategory } from "@/server/services/categories";
 import { parseAmount } from "@/lib/money";
 import { isISODate } from "@/lib/dates";
+import { requireUid } from "@/server/session";
 
 export interface TxActionState {
   ok: boolean;
@@ -24,9 +25,10 @@ function refresh() {
  * and the "always categorize" chip can still be offered next to it.
  */
 export async function setTransactionCategory(id: number, categoryId: number | null): Promise<{ ok: boolean }> {
+  const uid = await requireUid();
   if (!isId(id) || (categoryId !== null && !isId(categoryId))) return { ok: false };
-  if (categoryId !== null && !getCategory(categoryId)) return { ok: false };
-  categorizeTransactions([id], categoryId);
+  if (categoryId !== null && !getCategory(uid, categoryId)) return { ok: false };
+  categorizeTransactions(uid, [id], categoryId);
   return { ok: true };
 }
 
@@ -36,17 +38,19 @@ export async function createRuleFromTransaction(
   categoryId: number,
   pattern: string,
 ): Promise<{ ok: boolean; ruleApplied: number; message?: string }> {
+  const uid = await requireUid();
   const p = pattern.trim();
   if (!isId(id) || !isId(categoryId) || p.length < 2 || p.length > 100) {
     return { ok: false, ruleApplied: 0, message: "Invalid rule" };
   }
-  if (!getCategory(categoryId)) return { ok: false, ruleApplied: 0, message: "Unknown category" };
-  const { ruleApplied } = categorizeTransactions([id], categoryId, p);
+  if (!getCategory(uid, categoryId)) return { ok: false, ruleApplied: 0, message: "Unknown category" };
+  const { ruleApplied } = categorizeTransactions(uid, [id], categoryId, p);
   refresh();
   return { ok: true, ruleApplied };
 }
 
 export async function quickAddTransaction(fd: FormData): Promise<TxActionState> {
+  const uid = await requireUid();
   const s = (k: string) => {
     const v = fd.get(k);
     return typeof v === "string" ? v.trim() : "";
@@ -61,7 +65,7 @@ export async function quickAddTransaction(fd: FormData): Promise<TxActionState> 
   const category = s("categoryId");
   const account = Number(s("accountId"));
   try {
-    addTransaction({
+    addTransaction(uid, {
       date: date || undefined,
       description,
       amount,
@@ -79,8 +83,9 @@ export async function quickAddTransaction(fd: FormData): Promise<TxActionState> 
 }
 
 export async function deleteTransactionAction(fd: FormData): Promise<void> {
+  const uid = await requireUid();
   const id = Number(fd.get("id"));
   if (!isId(id)) return;
-  deleteTransaction(id);
+  deleteTransaction(uid, id);
   refresh();
 }

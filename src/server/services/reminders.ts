@@ -5,6 +5,7 @@ import { accounts, reminders, type Reminder } from "@/server/db/schema";
 import { nextOccurrence, describeRule } from "@/lib/schedule";
 import { isISODate } from "@/lib/dates";
 import { getSettings } from "./settings";
+import { getAccountRow } from "./accounts";
 
 export const reminderInputSchema = z
   .object({
@@ -27,26 +28,39 @@ export const reminderInputSchema = z
   .refine((r) => r.frequency !== "once" || !!r.date, { message: "One-off reminders need a date", path: ["date"] });
 export type ReminderInput = z.input<typeof reminderInputSchema>;
 
-function computeNext(r: Pick<Reminder, "frequency" | "dayOfMonth" | "dayOfWeek" | "monthOfYear" | "date" | "timeOfDay">, after = new Date()) {
-  return nextOccurrence(r, after, getSettings().timezone);
+function computeNext(
+  uid: string,
+  r: Pick<Reminder, "frequency" | "dayOfMonth" | "dayOfWeek" | "monthOfYear" | "date" | "timeOfDay">,
+  after = new Date(),
+) {
+  return nextOccurrence(r, after, getSettings(uid).timezone);
 }
 
-export function listReminders() {
+export function listReminders(uid: string) {
   return db()
     .select({ reminder: reminders, accountName: accounts.name })
     .from(reminders)
     .leftJoin(accounts, eq(accounts.id, reminders.accountId))
+    .where(eq(reminders.userId, uid))
     .orderBy(asc(reminders.nextRunAt))
     .all()
     .map(({ reminder, accountName }) => ({ ...reminder, accountName, schedule: describeRule(reminder) }));
 }
 
+/** Any user's reminder (scheduler / bot use the reminder's own userId). */
 export function getReminder(id: number): Reminder | undefined {
   return db().select().from(reminders).where(eq(reminders.id, id)).get();
 }
 
-export function createReminder(raw: ReminderInput): Reminder {
+function ownReminder(uid: string, id: number): Reminder {
+  const r = getReminder(id);
+  if (!r || r.userId !== uid) throw new Error(`Reminder ${id} not found`);
+  return r;
+}
+
+export function createReminder(uid: string, raw: ReminderInput): Reminder {
   const input = reminderInputSchema.parse(raw);
+  if (input.accountId) getAccountRow(uid, input.accountId);
   const values = {
     ...input,
     message: input.message ?? null,
@@ -58,13 +72,15 @@ export function createReminder(raw: ReminderInput): Reminder {
   };
   return db()
     .insert(reminders)
-    .values({ ...values, nextRunAt: input.enabled ? computeNext(values) : null })
+    .values({ ...values, userId: uid, nextRunAt: input.enabled ? computeNext(uid, values) : null })
     .returning()
     .get();
 }
 
-export function updateReminder(id: number, raw: ReminderInput): Reminder {
+export function updateReminder(uid: string, id: number, raw: ReminderInput): Reminder {
+  ownReminder(uid, id);
   const input = reminderInputSchema.parse(raw);
+  if (input.accountId) getAccountRow(uid, input.accountId);
   const values = {
     ...input,
     message: input.message ?? null,
@@ -76,7 +92,7 @@ export function updateReminder(id: number, raw: ReminderInput): Reminder {
   };
   const updated = db()
     .update(reminders)
-    .set({ ...values, nextRunAt: input.enabled ? computeNext(values) : null })
+    .set({ ...values, nextRunAt: input.enabled ? computeNext(uid, values) : null })
     .where(eq(reminders.id, id))
     .returning()
     .get();
@@ -84,18 +100,20 @@ export function updateReminder(id: number, raw: ReminderInput): Reminder {
   return updated;
 }
 
-export function setReminderEnabled(id: number, enabled: boolean) {
-  const r = getReminder(id);
-  if (!r) throw new Error(`Reminder ${id} not found`);
+export function setReminderEnabled(uid: string, id: number, enabled: boolean) {
+  const r = ownReminder(uid, id);
   db()
     .update(reminders)
-    .set({ enabled, nextRunAt: enabled ? computeNext(r) : null, nextNagAt: enabled ? r.nextNagAt : null })
+    .set({ enabled, nextRunAt: enabled ? computeNext(uid, r) : null, nextNagAt: enabled ? r.nextNagAt : null })
     .where(eq(reminders.id, id))
     .run();
 }
 
-export function deleteReminder(id: number) {
-  db().delete(reminders).where(eq(reminders.id, id)).run();
+export function deleteReminder(uid: string, id: number) {
+  db()
+    .delete(reminders)
+    .where(and(eq(reminders.id, id), eq(reminders.userId, uid)))
+    .run();
 }
 
 /** Reminders whose scheduled time has come. */
@@ -127,16 +145,16 @@ export function markSent(id: number, messageId: number | null, opts: { nag: bool
   };
   if (!opts.nag) {
     patch.acknowledgedAt = null;
-    patch.nextRunAt = computeNext(r, now);
+    patch.nextRunAt = computeNext(r.userId, r, now);
     // A one-off reminder without nagging is done once delivered.
     if (r.frequency === "once" && r.nagEveryHours === 0) patch.enabled = false;
   }
   db().update(reminders).set(patch).where(eq(reminders.id, id)).run();
 }
 
-export function acknowledgeReminder(id: number, now = new Date()) {
+export function acknowledgeReminder(uid: string, id: number, now = new Date()) {
   const r = getReminder(id);
-  if (!r) return undefined;
+  if (!r || r.userId !== uid) return undefined;
   db()
     .update(reminders)
     .set({
@@ -149,25 +167,30 @@ export function acknowledgeReminder(id: number, now = new Date()) {
   return r;
 }
 
-export function snoozeReminder(id: number, hours: number, now = new Date()) {
+export function snoozeReminder(uid: string, id: number, hours: number, now = new Date()) {
   db()
     .update(reminders)
     .set({ nextNagAt: new Date(now.getTime() + hours * 3_600_000) })
-    .where(eq(reminders.id, id))
+    .where(and(eq(reminders.id, id), eq(reminders.userId, uid)))
     .run();
 }
 
-export function findReminderByMessageId(messageId: number): Reminder | undefined {
-  return db().select().from(reminders).where(eq(reminders.lastMessageId, messageId)).get();
+/** Message ids are per chat, so the lookup is scoped to the chat's user. */
+export function findReminderByMessageId(uid: string, messageId: number): Reminder | undefined {
+  return db()
+    .select()
+    .from(reminders)
+    .where(and(eq(reminders.userId, uid), eq(reminders.lastMessageId, messageId)))
+    .get();
 }
 
-export function upcomingReminders(limit = 5) {
-  return listReminders()
+export function upcomingReminders(uid: string, limit = 5) {
+  return listReminders(uid)
     .filter((r) => r.enabled && (r.nextRunAt || r.nextNagAt))
     .slice(0, limit);
 }
 
 /** Reminders that were sent and are still waiting for a ✅. */
-export function pendingReminders() {
-  return listReminders().filter((r) => r.enabled && r.nextNagAt !== null);
+export function pendingReminders(uid: string) {
+  return listReminders(uid).filter((r) => r.enabled && r.nextNagAt !== null);
 }

@@ -3,12 +3,14 @@ import { ArrowLeft } from "lucide-react";
 import { listAccounts } from "@/server/services/accounts";
 import { PageHeader } from "@/components/ui";
 import { ImportWizard } from "@/components/transactions-import-wizard";
+import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Import CSV" };
 
-export default function ImportPage() {
-  const accounts = listAccounts();
+export default async function ImportPage() {
+  const uid = (await requireUser()).id;
+  const accounts = listAccounts(uid);
   // Bank exports almost always come from a checking account: preselect it when there's only one.
   const checking = accounts.filter((a) => a.type === "checking");
   return (

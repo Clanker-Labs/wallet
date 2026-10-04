@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertCircle, ArrowRight, Bell, Clock, Tag } from "lucide-react";
+import { AlertCircle, ArrowRight, Bell, Clock, CircleDollarSign, LineChart, Tag } from "lucide-react";
 import { getOverview } from "@/server/services/overview";
 import { netWorthHistory } from "@/server/services/networth";
 import { serverFormat } from "@/server/format";
@@ -7,16 +7,25 @@ import { ASSET_CLASS_LABELS, ASSET_CLASS_SLOT, type AssetClass } from "@/lib/dom
 import { formatMonth } from "@/lib/dates";
 import { Badge, ButtonLink, Card, CardHeader, Delta, EmptyState, Meter, SeriesDot, Stat } from "@/components/ui";
 import { AllocationDonut, CashflowChart, NetWorthChart } from "@/components/charts";
+import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 
-const NUDGE_ICON = { stale_balance: Clock, uncategorized: Tag, over_budget: AlertCircle, pending_reminder: Bell };
+const NUDGE_ICON = {
+  stale_balance: Clock,
+  uncategorized: Tag,
+  over_budget: AlertCircle,
+  pending_reminder: Bell,
+  missing_rate: CircleDollarSign,
+  missing_price: LineChart,
+};
 
-export default function Dashboard() {
-  const o = getOverview();
-  const f = serverFormat();
+export default async function Dashboard() {
+  const uid = (await requireUser()).id;
+  const o = getOverview(uid);
+  const f = serverFormat(uid);
   const nw = o.netWorth;
-  const history = netWorthHistory(24);
+  const history = netWorthHistory(uid, 24);
 
   if (nw.accounts.length === 0) {
     return (

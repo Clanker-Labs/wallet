@@ -66,7 +66,10 @@ function finalText(content: Block[]): string {
 
 /** Run one user turn against the Claude API with the wallet tools. */
 export async function runAnthropicTurn(opts: {
+  userId: string;
   conversationId: string;
+  /** Extra content blocks (attachments) placed before the text. */
+  attachments?: Anthropic.Beta.BetaContentBlockParam[];
   message: string;
   channel: AgentChannel;
   onEvent: (e: AgentEvent) => void;
@@ -76,12 +79,15 @@ export async function runAnthropicTurn(opts: {
   const history = loadMessages(opts.conversationId);
   repairDanglingToolUse(opts.conversationId, history);
 
-  const userMessage: StoredMessage = { role: "user", content: [{ type: "text", text: opts.message }] };
+  const userMessage: StoredMessage = {
+    role: "user",
+    content: [...(opts.attachments ?? []), { type: "text", text: opts.message }],
+  };
   appendMessage(opts.conversationId, userMessage);
   history.push(userMessage);
 
   const tools = toolDefinitions();
-  const system = systemPrompt(opts.channel);
+  const system = systemPrompt(opts.userId, opts.channel);
   let lastText = "";
   let jsonRetries = 0;
 
@@ -142,7 +148,7 @@ export async function runAnthropicTurn(opts: {
     const results = await Promise.all(
       toolUses.map(async (use) => {
         opts.onEvent({ type: "tool_start", id: use.id, name: use.name, input: use.input });
-        const res = await callTool(use.name, use.input);
+        const res = await callTool({ userId: opts.userId }, use.name, use.input);
         opts.onEvent({ type: "tool_end", id: use.id, name: use.name, ok: res.ok });
         return {
           type: "tool_result" as const,

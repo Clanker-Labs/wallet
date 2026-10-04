@@ -11,6 +11,7 @@ import {
   updateCategory,
   upsertRule,
 } from "@/server/services/categories";
+import { requireUid } from "@/server/session";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string; errors?: Record<string, string> };
 
@@ -25,6 +26,7 @@ function errorText(e: unknown): string {
 }
 
 export async function savePreferences(input: AppSettings): Promise<ActionResult> {
+  const uid = await requireUid();
   const values: AppSettings = {
     currency: String(input.currency ?? "").trim().toUpperCase(),
     locale: String(input.locale ?? "").trim(),
@@ -35,7 +37,7 @@ export async function savePreferences(input: AppSettings): Promise<ActionResult>
     if (!values[key]) errors[key] = "Required";
     else {
       try {
-        setSetting(key, values[key]);
+        setSetting(uid, key, values[key]);
       } catch (e) {
         errors[key] = errorText(e);
       }
@@ -47,8 +49,9 @@ export async function savePreferences(input: AppSettings): Promise<ActionResult>
 }
 
 export async function addCategory(input: { name: string; kind: string; icon: string }): Promise<ActionResult> {
+  const uid = await requireUid();
   try {
-    const c = createCategory({
+    const c = createCategory(uid, {
       name: input.name,
       kind: input.kind as "income" | "expense" | "transfer",
       icon: input.icon.trim() || null,
@@ -61,8 +64,9 @@ export async function addCategory(input: { name: string; kind: string; icon: str
 }
 
 export async function editCategory(id: number, input: { name: string; icon: string }): Promise<ActionResult> {
+  const uid = await requireUid();
   try {
-    updateCategory(id, { name: input.name, icon: input.icon.trim() || null });
+    updateCategory(uid, id, { name: input.name, icon: input.icon.trim() || null });
     refreshAll();
     return { ok: true, message: "Saved" };
   } catch (e) {
@@ -71,15 +75,17 @@ export async function editCategory(id: number, input: { name: string; icon: stri
 }
 
 export async function removeCategory(id: number): Promise<ActionResult> {
-  deleteCategory(id);
+  const uid = await requireUid();
+  deleteCategory(uid, id);
   refreshAll();
   return { ok: true, message: "Deleted" };
 }
 
 export async function addRule(input: { pattern: string; categoryId: number }): Promise<ActionResult> {
+  const uid = await requireUid();
   if (!Number.isInteger(input.categoryId)) return { ok: false, error: "Pick a category" };
   try {
-    upsertRule(input.pattern, input.categoryId);
+    upsertRule(uid, input.pattern, input.categoryId);
     refreshAll();
     return { ok: true, message: `Rule “${input.pattern.trim().toLowerCase()}” saved` };
   } catch (e) {
@@ -88,13 +94,15 @@ export async function addRule(input: { pattern: string; categoryId: number }): P
 }
 
 export async function removeRule(id: number): Promise<ActionResult> {
-  deleteRule(id);
+  const uid = await requireUid();
+  deleteRule(uid, id);
   refreshAll();
   return { ok: true, message: "Rule deleted" };
 }
 
 export async function applyRules(): Promise<ActionResult> {
-  const n = applyRulesToUncategorized();
+  const uid = await requireUid();
+  const n = applyRulesToUncategorized(uid);
   refreshAll();
   return { ok: true, message: n ? `Categorized ${n} transaction${n > 1 ? "s" : ""}` : "No uncategorized transaction matched a rule" };
 }

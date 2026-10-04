@@ -18,12 +18,30 @@ export interface TgChat {
   first_name?: string;
 }
 
+export interface TgDocument {
+  file_id: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
+}
+
+export interface TgPhotoSize {
+  file_id: string;
+  width: number;
+  height: number;
+  file_size?: number;
+}
+
 export interface TgMessage {
   message_id: number;
   date: number;
   chat: TgChat;
   from?: TgUser;
   text?: string;
+  /** Text sent along with a document or photo. */
+  caption?: string;
+  document?: TgDocument;
+  photo?: TgPhotoSize[];
   reply_to_message?: TgMessage;
 }
 
@@ -76,6 +94,8 @@ export class TelegramError extends Error {
 
 export interface TelegramApi {
   getMe(): Promise<TgUser>;
+  /** Download a file a user sent (documents up to 20 MB). */
+  downloadFile(fileId: string): Promise<Buffer>;
   sendMessage(chatId: number, text: string, opts?: SendOptions): Promise<number>;
   editMessageReplyMarkup(chatId: number, messageId: number, replyMarkup?: InlineKeyboardMarkup): Promise<void>;
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
@@ -133,6 +153,14 @@ export function createApi(
 
   return {
     getMe: () => call<TgUser>("getMe", {}),
+
+    async downloadFile(fileId) {
+      const file = await call<{ file_path?: string }>("getFile", { file_id: fileId });
+      if (!file.file_path) throw new Error("Telegram did not return a file path");
+      const res = await doFetch(`${baseUrl}/file/bot${token}/${file.file_path}`);
+      if (!res.ok) throw new Error(`File download failed (${res.status})`);
+      return Buffer.from(await res.arrayBuffer());
+    },
 
     async sendMessage(chatId, text, o = {}) {
       const parseMode = o.parseMode === undefined ? "HTML" : o.parseMode;

@@ -17,6 +17,7 @@ import { today } from "@/server/services/settings";
 import { ACCOUNT_TYPES, type AccountType, type LoanParams } from "@/lib/domain";
 import { parseAmount } from "@/lib/money";
 import { isISODate } from "@/lib/dates";
+import { requireUid } from "@/server/session";
 
 export interface AccountActionState {
   ok: boolean;
@@ -119,10 +120,11 @@ function parseAccountForm(fd: FormData, mode: "create" | "edit"): { input?: Acco
 }
 
 export async function createAccountAction(fd: FormData): Promise<AccountActionState> {
+  const uid = await requireUid();
   const { input, error } = parseAccountForm(fd, "create");
   if (!input) return { ok: false, message: error! };
   try {
-    const account = createAccount(input);
+    const account = createAccount(uid, input);
     refresh();
     return { ok: true, message: `Added “${account.name}”`, id: account.id };
   } catch (e) {
@@ -131,13 +133,14 @@ export async function createAccountAction(fd: FormData): Promise<AccountActionSt
 }
 
 export async function updateAccountAction(fd: FormData): Promise<AccountActionState> {
+  const uid = await requireUid();
   const id = intId(fd.get("id"));
   if (!id) return { ok: false, message: "Unknown account." };
   const { input, error } = parseAccountForm(fd, "edit");
   if (!input) return { ok: false, message: error! };
   if (input.linkedAccountId === id) input.linkedAccountId = null;
   try {
-    updateAccount(id, input);
+    updateAccount(uid, id, input);
     refresh();
     return { ok: true, message: "Saved", id };
   } catch (e) {
@@ -147,25 +150,27 @@ export async function updateAccountAction(fd: FormData): Promise<AccountActionSt
 
 /** One-field balance update from the accounts list (InlineAmount). Returns whether anything was saved. */
 export async function quickRecordBalance(fd: FormData): Promise<boolean> {
+  const uid = await requireUid();
   const accountId = intId(fd.get("accountId"));
   const amount = parseAmount(String(fd.get("amount") ?? ""));
   if (!accountId || amount === null) return false;
-  recordBalance({ accountId, balance: amount, source: "manual" });
+  recordBalance(uid, { accountId, balance: amount, source: "manual" });
   refresh();
   return true;
 }
 
 /** Balance with an optional date & note (account page). */
 export async function recordBalanceAction(fd: FormData): Promise<AccountActionState> {
+  const uid = await requireUid();
   const accountId = intId(fd.get("accountId"));
   if (!accountId) return { ok: false, message: "Unknown account." };
   const amount = parseAmount(str(fd, "amount"));
   if (amount === null) return { ok: false, message: "Type the balance, e.g. 1234.56" };
-  const date = str(fd, "date") || today();
+  const date = str(fd, "date") || today(uid);
   if (!isISODate(date)) return { ok: false, message: "Pick a valid date." };
-  if (date > today()) return { ok: false, message: "That date is in the future." };
+  if (date > today(uid)) return { ok: false, message: "That date is in the future." };
   try {
-    recordBalance({ accountId, balance: amount, date, note: str(fd, "note") || null, source: "manual" });
+    recordBalance(uid, { accountId, balance: amount, date, note: str(fd, "note") || null, source: "manual" });
     refresh();
     return { ok: true, message: "Saved" };
   } catch (e) {
@@ -174,30 +179,34 @@ export async function recordBalanceAction(fd: FormData): Promise<AccountActionSt
 }
 
 export async function deleteSnapshotAction(fd: FormData): Promise<void> {
+  const uid = await requireUid();
   const id = intId(fd.get("snapshotId"));
   if (!id) return;
-  deleteSnapshot(id);
+  deleteSnapshot(uid, id);
   refresh();
 }
 
 export async function archiveAccountAction(fd: FormData): Promise<void> {
+  const uid = await requireUid();
   const id = intId(fd.get("id"));
   if (!id) return;
-  archiveAccount(id);
+  archiveAccount(uid, id);
   refresh();
 }
 
 export async function unarchiveAccountAction(fd: FormData): Promise<void> {
+  const uid = await requireUid();
   const id = intId(fd.get("id"));
   if (!id) return;
-  unarchiveAccount(id);
+  unarchiveAccount(uid, id);
   refresh();
 }
 
 export async function deleteAccountAction(fd: FormData): Promise<void> {
+  const uid = await requireUid();
   const id = intId(fd.get("id"));
   if (!id || fd.get("confirm") !== "yes") return;
-  deleteAccount(id);
+  deleteAccount(uid, id);
   refresh();
   redirect("/accounts");
 }

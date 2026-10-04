@@ -1,24 +1,15 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 
 /**
- * Two optional secrets:
- * - WALLET_PASSWORD protects the web UI (cookie session).
- * - WALLET_API_TOKEN protects programmatic access (Authorization: Bearer …)
- *   and is required for the remote MCP / tools endpoints.
+ * Programmatic access (MCP over HTTP, /api/tools, /api/agent without a
+ * browser session) is open by default because wallet is meant to run
+ * locally. Set WALLET_API_TOKEN to require `Authorization: Bearer <token>`.
  */
 export const SESSION_COOKIE = "wallet_session";
-
-export function passwordEnabled(): boolean {
-  return Boolean(process.env.WALLET_PASSWORD);
-}
+export const CHALLENGE_COOKIE = "wallet_challenge";
 
 export function apiTokenEnabled(): boolean {
   return Boolean(process.env.WALLET_API_TOKEN);
-}
-
-/** Session value derived from the password: rotating the password logs everyone out. */
-export function sessionValue(): string {
-  return createHmac("sha256", process.env.WALLET_PASSWORD ?? "").update("wallet-session-v1").digest("hex");
 }
 
 export function safeEqual(a: string, b: string): boolean {
@@ -27,17 +18,14 @@ export function safeEqual(a: string, b: string): boolean {
   return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
-export function checkPassword(candidate: string): boolean {
-  return passwordEnabled() && safeEqual(candidate, process.env.WALLET_PASSWORD!);
-}
-
-export function validSession(cookie: string | undefined): boolean {
-  if (!passwordEnabled()) return true;
-  return !!cookie && safeEqual(cookie, sessionValue());
-}
-
 export function validBearer(header: string | null): boolean {
   if (!apiTokenEnabled() || !header) return false;
   const m = header.match(/^Bearer\s+(.+)$/i);
   return !!m && safeEqual(m[1].trim(), process.env.WALLET_API_TOKEN!);
+}
+
+/** Sign-ups are open unless WALLET_ALLOW_SIGNUP=false (the first account can always be created). */
+export function signupAllowed(existingUsers: number): boolean {
+  if (existingUsers === 0) return true;
+  return !/^(0|false|no|off)$/i.test(process.env.WALLET_ALLOW_SIGNUP ?? "true");
 }

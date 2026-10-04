@@ -9,24 +9,26 @@ import { Badge, ButtonLink, Card, CardHeader, Meter, PageHeader, Stat } from "@/
 import { CashflowChart, HBarList } from "@/components/charts";
 import { InlineAmount } from "@/components/inline-amount";
 import { saveBudget } from "./actions";
+import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Budgets" };
 
 export default async function BudgetsPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
+  const uid = (await requireUser()).id;
   const params = await searchParams;
-  const current = today().slice(0, 7);
+  const current = today(uid).slice(0, 7);
   const month = params.month && isMonth(params.month) ? params.month : current;
-  const status = budgetStatus(month);
+  const status = budgetStatus(uid, month);
   const { start, end } = monthBounds(month);
-  const spending = spendingByCategory(start, end);
-  const flows = cashflow(12);
-  const f = serverFormat();
+  const spending = spendingByCategory(uid, start, end);
+  const flows = cashflow(uid, 12);
+  const f = serverFormat(uid);
 
   const budgeted = status.lines.filter((l) => l.budgetCents !== null);
   const unbudgeted = status.lines.filter((l) => l.budgetCents === null);
   const budgetedIds = new Set(budgeted.map((l) => l.categoryId));
-  const spare = listCategories().filter((c) => c.kind === "expense" && !budgetedIds.has(c.id) && !unbudgeted.some((u) => u.categoryId === c.id));
+  const spare = listCategories(uid).filter((c) => c.kind === "expense" && !budgetedIds.has(c.id) && !unbudgeted.some((u) => u.categoryId === c.id));
   const leftCents = status.totalBudgetCents - status.totalSpentInBudgetsCents;
 
   return (

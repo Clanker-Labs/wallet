@@ -9,6 +9,7 @@ export const ASSET_CLASSES = [
   "retirement",
   "real_estate",
   "crypto",
+  "commodities",
   "other",
   "liabilities",
 ] as const;
@@ -20,13 +21,14 @@ export const ASSET_CLASS_LABELS: Record<AssetClass, string> = {
   retirement: "Retirement",
   real_estate: "Real estate",
   crypto: "Crypto",
+  commodities: "Commodities",
   other: "Other assets",
   liabilities: "Liabilities",
 };
 
 /**
  * Categorical slot per asset class, in a fixed order (color follows the entity,
- * never its rank). Slots map to CSS variables --series-1 … --series-6.
+ * never its rank). Slots map to CSS variables --series-1 … --series-7.
  */
 export const ASSET_CLASS_SLOT: Record<Exclude<AssetClass, "liabilities">, number> = {
   cash: 1,
@@ -34,18 +36,20 @@ export const ASSET_CLASS_SLOT: Record<Exclude<AssetClass, "liabilities">, number
   retirement: 3,
   real_estate: 4,
   crypto: 5,
-  other: 6,
+  commodities: 6,
+  other: 7,
 };
 
 export const ACCOUNT_TYPES = {
   checking: { label: "Checking account", assetClass: "cash" },
-  savings: { label: "Savings (Livret A, LDDS…)", assetClass: "cash" },
-  brokerage: { label: "Brokerage (CTO)", assetClass: "investments" },
+  savings: { label: "Savings (Livret A, HYSA…)", assetClass: "cash" },
+  brokerage: { label: "Brokerage", assetClass: "investments" },
   pea: { label: "PEA", assetClass: "investments" },
   life_insurance: { label: "Life insurance (assurance-vie)", assetClass: "investments" },
   employee_savings: { label: "Employee savings (PEE)", assetClass: "investments" },
-  retirement: { label: "Retirement (PER, PERCO…)", assetClass: "retirement" },
+  retirement: { label: "Retirement (401k, IRA, PER…)", assetClass: "retirement" },
   crypto: { label: "Crypto", assetClass: "crypto" },
+  precious_metals: { label: "Precious metals & commodities", assetClass: "commodities" },
   real_estate: { label: "Real estate", assetClass: "real_estate" },
   vehicle: { label: "Vehicle", assetClass: "other" },
   other_asset: { label: "Other asset", assetClass: "other" },
@@ -64,6 +68,64 @@ export function assetClassFor(type: AccountType): AssetClass {
 
 export function isLiability(assetClass: AssetClass): boolean {
   return assetClass === "liabilities";
+}
+
+/** Kinds of positions an account can hold. */
+export const HOLDING_TYPES = {
+  stock: "Stock",
+  etf: "ETF",
+  fund: "Fund",
+  bond: "Bond",
+  crypto: "Crypto",
+  commodity: "Commodity",
+  cash: "Cash",
+  other: "Other",
+} as const;
+export type HoldingType = keyof typeof HOLDING_TYPES;
+export const HOLDING_TYPE_KEYS = Object.keys(HOLDING_TYPES) as HoldingType[];
+
+/** Account types whose value usually comes from holdings. */
+export const HOLDING_ACCOUNT_TYPES: AccountType[] = [
+  "brokerage",
+  "pea",
+  "life_insurance",
+  "employee_savings",
+  "retirement",
+  "crypto",
+  "precious_metals",
+];
+
+/** Currencies offered first in pickers; any code with a known FX rate works. */
+export const COMMON_CURRENCIES = [
+  "USD",
+  "EUR",
+  "GBP",
+  "CHF",
+  "CAD",
+  "AUD",
+  "JPY",
+  "CNY",
+  "HKD",
+  "SGD",
+  "SEK",
+  "NOK",
+  "DKK",
+  "PLN",
+  "INR",
+  "BRL",
+  "MXN",
+  "AED",
+  "BTC",
+  "ETH",
+  "XAU",
+] as const;
+
+export function normalizeCurrency(code: string): string {
+  return code.trim().toUpperCase();
+}
+
+export function isCurrencyCode(code: string): boolean {
+  return /^[A-Z0-9]{2,6}$/.test(normalizeCurrency(code));
 }
 
 /** Fixed-rate amortizing loan. Amounts are in currency units (not cents). */

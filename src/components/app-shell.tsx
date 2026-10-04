@@ -18,6 +18,7 @@ import {
   Sun,
   X,
 } from "lucide-react";
+import { Wordmark } from "./brand";
 
 const NAV = [
   { href: "/", label: "Net worth", icon: LayoutDashboard },
@@ -29,6 +30,9 @@ const NAV = [
   { href: "/assistant", label: "Assistant", icon: Bot },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
+
+/** Routes that render full-screen without the app chrome (auth / onboarding). */
+const BARE_PREFIXES = ["/login", "/signup", "/welcome"];
 
 function ThemeToggle() {
   const [theme, setTheme] = useState<"light" | "dark" | null>(null);
@@ -45,7 +49,11 @@ function ThemeToggle() {
     setTheme(next);
   };
   return (
-    <button onClick={toggle} className="rounded-lg p-2 text-ink-2 hover:bg-surface-2" aria-label="Toggle theme">
+    <button
+      onClick={toggle}
+      className="grid h-8 w-8 place-items-center rounded-lg text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+      aria-label="Toggle theme"
+    >
       {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
     </button>
   );
@@ -56,7 +64,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [pathname]);
 
-  if (pathname === "/login") return <>{children}</>;
+  if (BARE_PREFIXES.some((p) => pathname.startsWith(p))) return <>{children}</>;
 
   const nav = (
     <nav className="flex flex-col gap-0.5">
@@ -66,12 +74,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link
             key={href}
             href={href}
+            aria-current={active ? "page" : undefined}
             className={clsx(
-              "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition",
-              active ? "bg-surface-2 font-medium text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink",
+              "group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
+              active ? "bg-brand-tint font-medium text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink",
             )}
           >
-            <Icon size={16} strokeWidth={active ? 2.2 : 1.8} />
+            <Icon
+              size={16}
+              strokeWidth={active ? 2.2 : 1.8}
+              className={active ? "text-accent" : "text-muted transition-colors group-hover:text-ink-2"}
+              aria-hidden
+            />
             {label}
           </Link>
         );
@@ -81,31 +95,41 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen md:flex">
-      <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-border bg-surface px-3 py-5 md:flex">
-        <Link href="/" className="mb-6 flex items-center gap-2 px-3 text-base font-semibold tracking-tight">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-accent text-accent-ink">w</span>
-          wallet
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-border bg-surface px-3 py-5 md:flex">
+        <Link href="/" className="mb-7 flex items-center px-2.5" aria-label="wallet — net worth">
+          <Wordmark size={28} />
         </Link>
         {nav}
-        <div className="mt-auto flex items-center justify-between px-1">
-          <span className="text-xs text-muted">self-hosted</span>
+        <div className="mt-auto flex items-center justify-between border-t border-border px-1 pt-3">
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted">
+            <span className="h-1.5 w-1.5 rounded-full bg-gain" aria-hidden />
+            self-hosted
+          </span>
           <ThemeToggle />
         </div>
       </aside>
 
-      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-border bg-surface px-4 py-3 md:hidden">
-        <Link href="/" className="flex items-center gap-2 font-semibold">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-accent text-accent-ink">w</span>
-          wallet
-        </Link>
-        <div className="flex items-center gap-1">
-          <ThemeToggle />
-          <button className="rounded-lg p-2 hover:bg-surface-2" onClick={() => setOpen((o) => !o)} aria-label="Menu">
-            {open ? <X size={18} /> : <Menu size={18} />}
-          </button>
-        </div>
-      </header>
-      {open && <div className="border-b border-border bg-surface p-3 md:hidden">{nav}</div>}
+      <div className="sticky top-0 z-20 md:hidden">
+        <header className="flex items-center justify-between border-b border-border bg-page/85 px-4 py-2.5 backdrop-blur-md">
+          <Link href="/" className="flex items-center" aria-label="wallet — net worth">
+            <Wordmark size={26} />
+          </Link>
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <button
+              className="grid h-8 w-8 place-items-center rounded-lg text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+              onClick={() => setOpen((o) => !o)}
+              aria-label="Menu"
+              aria-expanded={open}
+            >
+              {open ? <X size={18} /> : <Menu size={18} />}
+            </button>
+          </div>
+        </header>
+        {open && (
+          <div className="absolute inset-x-0 top-full border-b border-border bg-surface p-3 shadow-pop">{nav}</div>
+        )}
+      </div>
 
       <main className="mx-auto w-full max-w-6xl min-w-0 px-4 py-6 md:px-8 md:py-8">{children}</main>
     </div>

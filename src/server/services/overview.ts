@@ -6,7 +6,7 @@ import { pendingReminders, upcomingReminders } from "./reminders";
 import { getSettings } from "./settings";
 
 export interface Nudge {
-  kind: "stale_balance" | "uncategorized" | "over_budget" | "pending_reminder";
+  kind: "stale_balance" | "uncategorized" | "over_budget" | "pending_reminder" | "missing_rate" | "missing_price";
   text: string;
   href: string;
 }
@@ -15,13 +15,13 @@ export interface Nudge {
  * Everything the dashboard (and the agent's first look) needs in one call,
  * including a short "needs attention" list.
  */
-export function getOverview() {
-  const { current, changes } = netWorthChanges();
-  const budget = budgetStatus();
-  const flows = cashflow(6);
-  const stale = staleAccounts();
-  const uncategorized = countUncategorized();
-  const pending = pendingReminders();
+export function getOverview(uid: string) {
+  const { current, changes } = netWorthChanges(uid);
+  const budget = budgetStatus(uid);
+  const flows = cashflow(uid, 6);
+  const stale = staleAccounts(uid);
+  const uncategorized = countUncategorized(uid);
+  const pending = pendingReminders(uid);
 
   const nudges: Nudge[] = [];
   for (const r of pending)
@@ -41,13 +41,18 @@ export function getOverview() {
   for (const l of budget.lines.filter((l) => l.status === "over"))
     nudges.push({ kind: "over_budget", text: `${l.name} is over budget`, href: "/budgets" });
 
+  for (const c of current.missingFx)
+    nudges.push({ kind: "missing_rate", text: `No exchange rate for ${c} yet — amounts in ${c} count as 0`, href: "/settings" });
+  for (const p of current.missingPrices.slice(0, 3))
+    nudges.push({ kind: "missing_price", text: `No price for ${p} — set a manual price or check the symbol`, href: "/investments" });
+
   return {
-    settings: getSettings(),
+    settings: getSettings(uid),
     netWorth: current,
     changes,
     budget,
     cashflow: flows,
-    upcoming: upcomingReminders(5),
+    upcoming: upcomingReminders(uid, 5),
     nudges,
   };
 }

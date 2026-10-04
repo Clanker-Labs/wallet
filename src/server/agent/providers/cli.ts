@@ -28,13 +28,13 @@ export function cliAvailable(kind: CliKind): boolean {
     .some((dir) => dir && fs.existsSync(/*turbopackIgnore: true*/ path.join(/*turbopackIgnore: true*/ dir, bin)));
 }
 
-/** How a CLI agent should launch the wallet MCP server (stdio). */
-export function mcpServerSpec() {
+/** How a CLI agent should launch the wallet MCP server (stdio), acting as `userId`. */
+export function mcpServerSpec(userId: string) {
   const root = process.env.WALLET_ROOT || process.cwd();
   const custom = process.env.WALLET_MCP_COMMAND?.trim();
   // bin/wallet-mcp.mjs works from any cwd (it chdirs to the repo and registers tsx).
   const [command, ...args] = custom ? custom.split(/\s+/) : [process.execPath, path.join(root, "bin", "wallet-mcp.mjs")];
-  const env: Record<string, string> = { WALLET_DB_PATH: path.resolve(dbPath()) };
+  const env: Record<string, string> = { WALLET_DB_PATH: path.resolve(dbPath()), WALLET_USER_ID: userId };
   for (const key of ["WALLET_AGENT_READONLY", "WALLET_TIMEZONE", "WALLET_CURRENCY", "WALLET_LOCALE"]) {
     if (process.env[key]) env[key] = process.env[key]!;
   }
@@ -50,8 +50,8 @@ function workDir() {
 
 const toml = (s: string) => JSON.stringify(s); // TOML basic strings share JSON escaping
 
-function buildArgs(kind: CliKind, message: string, channel: AgentChannel, sessionId: string | null) {
-  const mcp = mcpServerSpec();
+function buildArgs(kind: CliKind, userId: string, message: string, channel: AgentChannel, sessionId: string | null) {
+  const mcp = mcpServerSpec(userId);
   if (kind === "claude-code") {
     const args = [
       "-p",
@@ -67,7 +67,7 @@ function buildArgs(kind: CliKind, message: string, channel: AgentChannel, sessio
       "--allowedTools",
       "mcp__wallet",
       "--append-system-prompt",
-      systemPrompt(channel),
+      systemPrompt(userId, channel),
     ];
     if (sessionId) args.push("--resume", sessionId);
     if (process.env.WALLET_CLAUDE_MODEL) args.push("--model", process.env.WALLET_CLAUDE_MODEL);
@@ -94,7 +94,7 @@ function buildArgs(kind: CliKind, message: string, channel: AgentChannel, sessio
   // Codex has no system-prompt flag: the instructions lead the first message of a thread.
   const prompt = sessionId
     ? message
-    : `<instructions>\n${systemPrompt(channel)}\nUse only the wallet MCP tools; do not run shell commands or edit files.\n</instructions>\n\n${message}`;
+    : `<instructions>\n${systemPrompt(userId, channel)}\nUse only the wallet MCP tools; do not run shell commands or edit files.\n</instructions>\n\n${message}`;
   return sessionId ? ["exec", ...flags, "resume", sessionId, prompt] : ["exec", ...flags, prompt];
 }
 
@@ -102,13 +102,14 @@ const stripPrefix = (name: string) => name.replace(/^mcp__wallet__/, "");
 
 export async function runCliTurn(opts: {
   kind: CliKind;
+  userId: string;
   message: string;
   channel: AgentChannel;
   sessionId: string | null;
   onEvent: (e: AgentEvent) => void;
   signal?: AbortSignal;
 }): Promise<{ text: string; sessionId: string | null }> {
-  const child = spawn(/*turbopackIgnore: true*/ BINARIES[opts.kind], buildArgs(opts.kind, opts.message, opts.channel, opts.sessionId), {
+  const child = spawn(/*turbopackIgnore: true*/ BINARIES[opts.kind], buildArgs(opts.kind, opts.userId, opts.message, opts.channel, opts.sessionId), {
     cwd: workDir(),
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],

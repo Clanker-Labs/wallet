@@ -9,6 +9,7 @@ import { Badge, Button, ButtonLink, Card, CardHeader, EmptyState, PageHeader, Se
 import { AccountForm } from "@/components/accounts-form";
 import { BalanceUpdater, Disclosure } from "@/components/accounts-ui";
 import { unarchiveAccountAction } from "./actions";
+import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Accounts" };
@@ -28,10 +29,11 @@ function updatedLabel(days: number | null) {
 }
 
 export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
+  const uid = (await requireUser()).id;
   const params = await searchParams;
-  const f = serverFormat();
-  const t = today();
-  const all = listAccounts({ includeArchived: true });
+  const f = serverFormat(uid);
+  const t = today(uid);
+  const all = listAccounts(uid, { includeArchived: true });
   const active = all.filter((a) => !a.archivedAt);
   const archived = all.filter((a) => a.archivedAt);
   const properties = active.filter((a) => a.assetClass === "real_estate").map((a) => ({ id: a.id, name: a.name }));

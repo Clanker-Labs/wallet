@@ -36,6 +36,7 @@ const CLASS_EMOJI: Record<AssetClass, string> = {
   retirement: "🏖️",
   real_estate: "🏠",
   crypto: "🪙",
+  commodities: "🥇",
   other: "📦",
   liabilities: "💳",
 };
@@ -47,9 +48,9 @@ const STATUS_EMOJI: Record<BudgetLineStatus, string> = {
   unbudgeted: "⚪",
 };
 
-/** Money formatter bound to the configured currency & locale. */
-function moneyFormatter() {
-  const { currency, locale } = getSettings();
+/** Money formatter bound to the user's base currency & locale. */
+function moneyFormatter(uid: string) {
+  const { currency, locale } = getSettings(uid);
   return (cents: number, opts: MoneyFormat = {}) => formatMoney(cents, { currency, locale, ...opts });
 }
 
@@ -114,38 +115,37 @@ export function renderReminder(r: Reminder, opts: { nag?: boolean } = {}): strin
 function reminderBody(r: Reminder): string[] {
   switch (r.kind) {
     case "balance_update":
-      return balanceUpdateBody(r.accountId);
+      return balanceUpdateBody(r.userId, r.accountId);
     case "statement":
-      return statementBody(r.accountId);
+      return statementBody(r.userId, r.accountId);
     case "monthly_report":
-      return [renderMonthlyReport()];
+      return [renderMonthlyReport(r.userId)];
     default:
       return [];
   }
 }
 
-function accountOrNull(id: number | null) {
+function accountOrNull(uid: string, id: number | null) {
   if (id === null) return null;
   try {
-    return getAccount(id).account;
+    return getAccount(uid, id).account;
   } catch {
     return null;
   }
 }
 
-function balanceUpdateBody(accountId: number | null): string[] {
-  const m = moneyFormatter();
-  const { locale } = getSettings();
-  const account = accountOrNull(accountId);
+function balanceUpdateBody(uid: string, accountId: number | null): string[] {
+  const { locale } = getSettings(uid);
+  const account = accountOrNull(uid, accountId);
   if (account) {
     const last = account.lastUpdated ? ` (${formatDate(account.lastUpdated, locale)})` : "";
     return [
       `🏦 ${esc(account.name)}${account.institution ? ` · ${esc(account.institution)}` : ""}`,
-      `Last: ${m(account.balanceCents)}${last}`,
+      `Last: ${formatMoney(account.balanceCents, { currency: account.currency, locale })}${last}`,
       "↩️ <b>Reply to this message with the new balance.</b>",
     ];
   }
-  const stale = staleAccounts();
+  const stale = staleAccounts(uid);
   const lines = stale.length ? ["🕰️ Not updated for a while:"] : [];
   for (const a of stale.slice(0, 8)) {
     lines.push(`• ${esc(a.name)} — ${a.lastUpdated ? formatDate(a.lastUpdated, locale) : "never"}`);
@@ -155,22 +155,23 @@ function balanceUpdateBody(accountId: number | null): string[] {
   return lines;
 }
 
-function statementBody(accountId: number | null): string[] {
-  const account = accountOrNull(accountId);
+function statementBody(uid: string, accountId: number | null): string[] {
+  const account = accountOrNull(uid, accountId);
   const base = process.env.WALLET_PUBLIC_URL?.replace(/\/+$/, "");
   return [
-    `📄 Time to import your bank statement (CSV)${account ? ` for <b>${esc(account.name)}</b>` : ""}.`,
-    base ? `👉 <a href="${esc(base)}/transactions/import">Open the import page</a>` : "👉 Open the wallet web app → Transactions → Import CSV.",
+    `📄 Time to import your bank statement${account ? ` for <b>${esc(account.name)}</b>` : ""}.`,
+    "📎 Send the CSV or PDF right here and the assistant will import it.",
+    base ? `👉 Or drop it in the <a href="${esc(base)}/assistant">web assistant</a>.` : "👉 Or drop it in the web app's assistant.",
   ];
 }
 
 /** Last month in review: cash flow, budget overruns, net worth. */
-export function renderMonthlyReport(): string {
-  const m = moneyFormatter();
+export function renderMonthlyReport(uid: string): string {
+  const m = moneyFormatter(uid);
   const whole = { whole: true };
-  const flow = cashflow(2)[0];
+  const flow = cashflow(uid, 2)[0];
   const month = flow.month;
-  const lines = [`📊 <b>${DateTime.fromISO(`${month}-01`).setLocale(getSettings().locale).toFormat("LLLL yyyy")}</b>`];
+  const lines = [`📊 <b>${DateTime.fromISO(`${month}-01`).setLocale(getSettings(uid).locale).toFormat("LLLL yyyy")}</b>`];
 
   if (!flow.incomeCents && !flow.expensesCents) {
     lines.push("🤷 No transactions recorded.");
@@ -184,7 +185,7 @@ export function renderMonthlyReport(): string {
     }
   }
 
-  const budget = budgetStatus(month);
+  const budget = budgetStatus(uid, month);
   const over = budget.lines
     .filter((l) => l.status === "over" && l.budgetCents !== null)
     .sort((a, b) => b.spentCents - b.budgetCents! - (a.spentCents - a.budgetCents!));
@@ -199,24 +200,24 @@ export function renderMonthlyReport(): string {
     lines.push("", "🟢 All budgets on track ✨");
   }
 
-  const { current, changes } = netWorthChanges();
+  const { current, changes } = netWorthChanges(uid);
   lines.push("", `🏦 Net worth: ${m(current.netCents, whole)}`);
   const month1 = changes.find((c) => c.label === "1 month");
-  if (month1) lines.push(changeLine(month1.label, month1.deltaCents, month1.deltaPct));
+  if (month1) lines.push(changeLine(uid, month1.label, month1.deltaCents, month1.deltaPct));
   return lines.join("\n");
 }
 
-function changeLine(label: string, deltaCents: number, deltaPct: number | null): string {
-  const m = moneyFormatter();
+function changeLine(uid: string, label: string, deltaCents: number, deltaPct: number | null): string {
+  const m = moneyFormatter(uid);
   const p = deltaPct !== null ? ` (${signedPct(deltaPct)})` : "";
   return `${trend(deltaCents)} ${label}: ${m(deltaCents, { whole: true, signed: true })}${p}`;
 }
 
 /** /reminders: what's waiting for a ✅ and what's coming up. */
-export function renderReminders(): string {
-  const { timezone, locale } = getSettings();
+export function renderReminders(uid: string): string {
+  const { timezone, locale } = getSettings(uid);
   const when = (d: Date) => DateTime.fromJSDate(d).setZone(timezone).setLocale(locale).toFormat("ccc d LLL, HH:mm");
-  const list = listReminders().filter((r) => r.enabled);
+  const list = listReminders(uid).filter((r) => r.enabled);
   if (!list.length) return "⏰ No reminders yet. Add some in the web app.";
 
   const lines = ["⏰ <b>Reminders</b>"];
@@ -238,10 +239,10 @@ export function renderReminders(): string {
 
 // ── Net worth & budget ───────────────────────────────────────────────────
 
-export function renderNetWorth(): string {
-  const m = moneyFormatter();
+export function renderNetWorth(uid: string): string {
+  const m = moneyFormatter(uid);
   const whole = { whole: true };
-  const { current, changes } = netWorthChanges();
+  const { current, changes } = netWorthChanges(uid);
   if (!current.accounts.length) return "🏦 No accounts yet. Add them in the web app.";
 
   const lines = [
@@ -261,15 +262,15 @@ export function renderNetWorth(): string {
     }
   }
   const shown = changes.filter((c) => c.label === "1 month" || c.label === "YTD");
-  if (shown.length) lines.push("", ...shown.map((c) => changeLine(c.label, c.deltaCents, c.deltaPct)));
+  if (shown.length) lines.push("", ...shown.map((c) => changeLine(uid, c.label, c.deltaCents, c.deltaPct)));
   return lines.join("\n");
 }
 
-export function renderBudget(month = today().slice(0, 7)): string {
-  const m = moneyFormatter();
+export function renderBudget(uid: string, month = today(uid).slice(0, 7)): string {
+  const m = moneyFormatter(uid);
   const whole = { whole: true };
-  const { locale } = getSettings();
-  const s = budgetStatus(month);
+  const { locale } = getSettings(uid);
+  const s = budgetStatus(uid, month);
 
   let header = `🧾 <b>Budget · ${formatMonth(month, locale)}</b>`;
   if (s.elapsed > 0 && s.elapsed < 1) header += ` · ${pct(s.elapsed * 100)} of month gone`;
@@ -302,12 +303,15 @@ export function renderBudget(month = today().slice(0, 7)): string {
 // ── Confirmations ────────────────────────────────────────────────────────
 
 export function renderBalanceRecorded(opts: {
+  uid: string;
   accountName: string;
+  currency: string;
   beforeCents: number;
   afterCents: number;
   derivedFromLoan?: boolean;
 }): string {
-  const m = moneyFormatter();
+  const { locale } = getSettings(opts.uid);
+  const m = (cents: number, o: MoneyFormat = {}) => formatMoney(cents, { currency: opts.currency, locale, ...o });
   const delta = opts.afterCents - opts.beforeCents;
   const lines = [
     `✅ <b>${esc(opts.accountName)}</b> updated`,
@@ -319,22 +323,25 @@ export function renderBalanceRecorded(opts: {
 }
 
 export function renderTransactionAdded(opts: {
+  uid: string;
+  currency: string;
   amountCents: number;
   category: Category | undefined;
   categoryQuery: string;
   note: string | null;
 }): string {
-  const m = moneyFormatter();
+  const m = moneyFormatter(opts.uid);
+  const { locale } = getSettings(opts.uid);
   const { amountCents, category } = opts;
   const verb = amountCents < 0 ? "💸 Spent" : "💰 Earned";
   const label = category ? `${icon(category.icon)}${esc(category.name)}` : "❔ Uncategorized";
-  const lines = [`${verb} <b>${m(Math.abs(amountCents))}</b> · ${label}`];
+  const lines = [`${verb} <b>${formatMoney(Math.abs(amountCents), { currency: opts.currency, locale })}</b> · ${label}`];
   if (opts.note) lines.push(`📝 ${esc(opts.note)}`);
   if (!category && opts.categoryQuery) {
     lines.push(`❔ No category matches “${esc(opts.categoryQuery)}” — saved as uncategorized.`);
   }
   if (category && amountCents < 0) {
-    const line = budgetStatus().lines.find((l) => l.categoryId === category.id && l.budgetCents !== null);
+    const line = budgetStatus(opts.uid).lines.find((l) => l.categoryId === category.id && l.budgetCents !== null);
     if (line) {
       lines.push(
         `${STATUS_EMOJI[line.status]} ${m(line.spentCents, { whole: true })} / ${m(line.budgetCents!, { whole: true })} this month (${pct(line.pct ?? 0)})`,

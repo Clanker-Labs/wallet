@@ -4,6 +4,7 @@ import path from "node:path";
 import { anthropicConfigured, anthropicModel, runAnthropicTurn } from "./providers/anthropic";
 import { cliAvailable, runCliTurn, type CliKind } from "./providers/cli";
 import { appendMessage, createConversation, getConversation, setExternalSession } from "./conversations";
+import { attachmentBlocks, attachmentNote, DEFAULT_IMPORT_PROMPT } from "./attachments";
 import type { AgentChannel } from "./prompt";
 import type { AgentEvent } from "./events";
 
@@ -46,8 +47,11 @@ export function agentStatus(): { provider: AgentProvider; ready: boolean; reason
 const locks = new Map<string, Promise<unknown>>();
 
 export async function runAgent(opts: {
+  userId: string;
   conversationId?: string;
   message: string;
+  /** Upload ids dropped into the chat with this message. */
+  attachments?: string[];
   channel: AgentChannel;
   onEvent?: (e: AgentEvent) => void;
   signal?: AbortSignal;
@@ -56,11 +60,14 @@ export async function runAgent(opts: {
   if (!status.ready) throw new Error(status.reason ?? "Assistant not configured");
   const provider = status.provider as Exclude<AgentProvider, "none">;
   const onEvent = opts.onEvent ?? (() => {});
+  const uploadIds = opts.attachments ?? [];
+  const message = opts.message.trim() || (uploadIds.length ? DEFAULT_IMPORT_PROMPT : "");
+  if (!message) throw new Error("Empty message");
 
-  let conv = opts.conversationId ? getConversation(opts.conversationId) : undefined;
+  let conv = opts.conversationId ? getConversation(opts.userId, opts.conversationId) : undefined;
   // A thread belongs to one backend; switching backends starts a new thread.
   if (!conv || conv.provider !== provider) {
-    conv = createConversation({ channel: opts.channel, provider, title: opts.message });
+    conv = createConversation({ userId: opts.userId, channel: opts.channel, provider, title: message });
   }
   const conversationId = conv.id;
   onEvent({ type: "conversation", id: conversationId, provider });
@@ -68,13 +75,23 @@ export async function runAgent(opts: {
   const previous = locks.get(conversationId) ?? Promise.resolve();
   const run = previous.catch(() => {}).then(async () => {
     if (provider === "anthropic") {
-      return runAnthropicTurn({ conversationId, message: opts.message, channel: opts.channel, onEvent, signal: opts.signal });
+      return runAnthropicTurn({
+        userId: opts.userId,
+        conversationId,
+        message,
+        attachments: await attachmentBlocks(opts.userId, uploadIds),
+        channel: opts.channel,
+        onEvent,
+        signal: opts.signal,
+      });
     }
-    const fresh = getConversation(conversationId)!;
-    appendMessage(conversationId, { role: "user", content: [{ type: "text", text: opts.message }] });
+    const fresh = getConversation(opts.userId, conversationId)!;
+    const fullMessage = message + attachmentNote(opts.userId, uploadIds);
+    appendMessage(conversationId, { role: "user", content: [{ type: "text", text: fullMessage }] });
     const res = await runCliTurn({
       kind: provider as CliKind,
-      message: opts.message,
+      userId: opts.userId,
+      message: fullMessage,
       channel: opts.channel,
       sessionId: fresh.externalSessionId,
       onEvent,

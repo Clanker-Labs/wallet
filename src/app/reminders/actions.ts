@@ -10,6 +10,7 @@ import {
   updateReminder,
   type ReminderInput,
 } from "@/server/services/reminders";
+import { requireUid } from "@/server/session";
 
 export type SaveReminderResult =
   | { ok: true; id: number; title: string }
@@ -22,6 +23,7 @@ function refresh() {
 
 /** Create (id = null) or update a reminder. Returns field errors from reminderInputSchema. */
 export async function saveReminder(id: number | null, input: ReminderInput): Promise<SaveReminderResult> {
+  const uid = await requireUid();
   const parsed = reminderInputSchema.safeParse(input);
   if (!parsed.success) {
     const errors: Record<string, string> = {};
@@ -36,7 +38,7 @@ export async function saveReminder(id: number | null, input: ReminderInput): Pro
     return { ok: false, errors };
   }
   try {
-    const r = id === null ? createReminder(parsed.data) : updateReminder(id, parsed.data);
+    const r = id === null ? createReminder(uid, parsed.data) : updateReminder(uid, id, parsed.data);
     refresh();
     return { ok: true, id: r.id, title: r.title };
   } catch (e) {
@@ -45,17 +47,20 @@ export async function saveReminder(id: number | null, input: ReminderInput): Pro
 }
 
 export async function toggleReminder(id: number, enabled: boolean): Promise<void> {
-  setReminderEnabled(id, enabled);
+  const uid = await requireUid();
+  setReminderEnabled(uid, id, enabled);
   refresh();
 }
 
 /** The ✅ from the web: stops the nagging until the next occurrence. */
 export async function markReminderDone(id: number): Promise<void> {
-  acknowledgeReminder(id);
+  const uid = await requireUid();
+  acknowledgeReminder(uid, id);
   refresh();
 }
 
 export async function removeReminder(id: number): Promise<void> {
-  deleteReminder(id);
+  const uid = await requireUid();
+  deleteReminder(uid, id);
   refresh();
 }

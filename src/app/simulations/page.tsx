@@ -8,13 +8,15 @@ import { PageHeader } from "@/components/ui";
 import { SimWorkspace } from "@/components/sim-workspace";
 import { isSimTab, type DataDefaults, type SavedScenario } from "@/components/sim-model";
 import type { Simulation } from "@/server/db/schema";
+import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Simulations" };
 
 export default async function SimulationsPage({ searchParams }: { searchParams: Promise<{ tab?: string; load?: string }> }) {
+  const uid = (await requireUser()).id;
   const sp = await searchParams;
-  const { timezone, locale } = getSettings();
+  const { timezone, locale } = getSettings(uid);
 
   const toSaved = (s: Simulation): SavedScenario => ({
     id: s.id,
@@ -23,13 +25,13 @@ export default async function SimulationsPage({ searchParams }: { searchParams: 
     params: s.params ?? {},
     createdLabel: DateTime.fromJSDate(s.createdAt).setZone(timezone).setLocale(locale).toFormat("d LLL yyyy"),
   });
-  const saved = listSimulations().map(toSaved);
+  const saved = listSimulations(uid).map(toSaved);
   const loadId = Number(sp.load);
-  const loadedRow = Number.isInteger(loadId) && loadId > 0 ? getSimulation(loadId) : undefined;
+  const loadedRow = Number.isInteger(loadId) && loadId > 0 ? getSimulation(uid, loadId) : undefined;
 
   // Prefill the projection (and the mortgage income) from the user's own data.
-  const nw = netWorthOn();
-  const savings = averageMonthlySavings(6);
+  const nw = netWorthOn(uid);
+  const savings = averageMonthlySavings(uid, 6);
   const blend = blendedAssumptions(nw.byClassCents);
   const hasFlows = savings.monthsWithData > 0;
   const data: DataDefaults = {

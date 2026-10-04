@@ -7,7 +7,10 @@
  */
 import fs from "node:fs";
 import { db, dbPath } from "@/server/db/client";
-import { getSettings } from "@/server/services/settings";
+import { ensureFreshRates } from "@/server/services/fx";
+import { refreshPrices } from "@/server/services/prices";
+import { snapshotHoldingAccounts } from "@/server/services/accounts";
+import { listUsers } from "@/server/services/users";
 import { allowedChatIds, createApi, TelegramError, type TelegramApi } from "@/server/telegram/api";
 import { handleUpdate, type BotContext } from "@/server/telegram/bot";
 import { BOT_COMMANDS } from "@/server/telegram/messages";
@@ -15,6 +18,20 @@ import { tick } from "@/server/telegram/scheduler";
 
 const POLL_TIMEOUT_SEC = 25;
 const TICK_EVERY_MS = 30_000;
+const MARKET_EVERY_MS = 60 * 60_000;
+
+/** Daily FX rates + market prices, then today's value of holdings-based accounts. */
+async function refreshMarketData() {
+  try {
+    await ensureFreshRates();
+    const r = await refreshPrices();
+    if (r.updated.length) log(`📈 prices updated: ${r.updated.join(", ")}`);
+    if (r.failed.length) log(`⚠️ prices: ${r.failed.map((f) => f.error).join("; ")}`);
+    for (const u of listUsers()) snapshotHoldingAccounts(u.id);
+  } catch (e) {
+    log(`⚠️ market data: ${errorText(e)}`);
+  }
+}
 
 const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -35,30 +52,10 @@ function loadEnvFiles() {
 const SETUP_GUIDE = `
 wallet · Telegram setup
   1. In Telegram, talk to @BotFather → /newbot → copy the bot token.
-  2. Add it to .env:            TELEGRAM_BOT_TOKEN=123456:ABC...
-  3. Send any message to your new bot, then run \`npm run worker\` again:
-     it prints the chat ids that wrote to it.
-  4. Add yours to .env:         TELEGRAM_CHAT_ID=123456789   (comma-separate several)
-  5. Check it works:            npm run worker -- --test
+  2. Add it to .env:   TELEGRAM_BOT_TOKEN=123456:ABC...
+  3. Run the worker:   npm run worker
+  4. In the web app:   Settings → Telegram → "Connect" and send the /start CODE to your bot.
 `;
-
-/** Without TELEGRAM_CHAT_ID: list the chats that recently wrote to the bot (without consuming updates). */
-async function printRecentChats(api: TelegramApi) {
-  try {
-    const updates = await api.getUpdates(0, 0);
-    const chats = new Map<number, string>();
-    for (const u of updates) {
-      const chat = u.message?.chat ?? u.callback_query?.message?.chat;
-      if (chat) chats.set(chat.id, chat.username ? `@${chat.username}` : (chat.title ?? chat.first_name ?? chat.type));
-    }
-    if (!chats.size) return console.error("No messages yet: send one to your bot and run this again.\n");
-    console.error("Chats that wrote to your bot:");
-    for (const [id, name] of chats) console.error(`  ${id}  ${name}`);
-    console.error("");
-  } catch (e) {
-    console.error(`Could not list recent chats: ${errorText(e)}\n`);
-  }
-}
 
 async function sendTest(api: TelegramApi, chatIds: number[]) {
   let ok = true;
@@ -77,7 +74,9 @@ async function sendTest(api: TelegramApi, chatIds: number[]) {
 async function runForever(api: TelegramApi, chatIds: number[]) {
   const me = await api.getMe();
   await api.setMyCommands(BOT_COMMANDS.map(({ command, description }) => ({ command, description })));
-  log(`🤖 @${me.username} online · chats ${chatIds.join(", ")} · tz ${getSettings().timezone} · db ${dbPath()}`);
+  log(
+    `🤖 @${me.username} online · db ${dbPath()} · ${chatIds.length ? `owner chats ${chatIds.join(", ")}` : "chats linked from Settings → Telegram"}`,
+  );
 
   const controller = new AbortController();
   const ctx: BotContext = { api, allowedChatIds: chatIds, botUsername: me.username, signal: controller.signal, log };
@@ -98,6 +97,9 @@ async function runForever(api: TelegramApi, chatIds: number[]) {
   };
   void runTick();
   const timer = setInterval(runTick, TICK_EVERY_MS);
+  // Exchange rates and market prices: refresh in the background, record daily values.
+  void refreshMarketData();
+  const marketTimer = setInterval(refreshMarketData, MARKET_EVERY_MS);
 
   let stopping = false;
   const stop = (signal: string) => {
@@ -105,6 +107,7 @@ async function runForever(api: TelegramApi, chatIds: number[]) {
     stopping = true;
     log(`${signal} received, shutting down…`);
     clearInterval(timer);
+    clearInterval(marketTimer);
     controller.abort();
   };
   process.on("SIGINT", () => stop("SIGINT"));
@@ -150,15 +153,13 @@ async function main() {
   }
   // TELEGRAM_API_URL: optional, for a self-hosted Bot API server.
   const api = createApi(token, { baseUrl: process.env.TELEGRAM_API_URL || undefined });
-  if (!chatIds.length) {
-    console.error(`TELEGRAM_CHAT_ID is not set (comma-separated chat ids allowed to use the bot).\n${SETUP_GUIDE}`);
-    await printRecentChats(api);
-    process.exit(1);
-  }
 
   db(); // open & migrate before anything else
 
-  if (args.has("--test")) process.exit((await sendTest(api, chatIds)) ? 0 : 1);
+  if (args.has("--test")) {
+    const targets = [...new Set([...chatIds, ...listUsers().flatMap((u) => (u.telegramChatId ? [u.telegramChatId] : []))])];
+    process.exit((await sendTest(api, targets)) ? 0 : 1);
+  }
   if (args.has("--once")) {
     const s = await tick(new Date(), api, chatIds, log);
     log(`tick done · sent ${s.sent} · nagged ${s.nagged} · failed ${s.failed}`);

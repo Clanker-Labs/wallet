@@ -12,23 +12,25 @@ import { NetWorthChart } from "@/components/charts";
 import { AccountForm } from "@/components/accounts-form";
 import { ConfirmButton, DeleteAccountForm, Disclosure, RecordBalanceForm } from "@/components/accounts-ui";
 import { archiveAccountAction, deleteSnapshotAction, unarchiveAccountAction } from "../actions";
+import { requireUser } from "@/server/session";
+import { valuationContext } from "@/server/services/valuation";
 
 export const dynamic = "force-dynamic";
 
 type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ all?: string }> };
 
-function load(idParam: string) {
+function load(uid: string, idParam: string) {
   const id = Number(idParam);
   if (!Number.isInteger(id) || id <= 0) return null;
   try {
-    return getAccount(id);
+    return getAccount(uid, id);
   } catch {
     return null;
   }
 }
 
 export async function generateMetadata({ params }: Props) {
-  const data = load((await params).id);
+  const data = load((await requireUser()).id, (await params).id);
   return { title: data?.account.name ?? "Account" };
 }
 
@@ -43,19 +45,20 @@ const SOURCE_LABELS: Record<string, string> = {
 const RECORDS_SHOWN = 12;
 
 export default async function AccountPage({ params, searchParams }: Props) {
-  const data = load((await params).id);
+  const uid = (await requireUser()).id;
+  const data = load(uid, (await params).id);
   const showAll = (await searchParams).all === "1";
   if (!data) notFound();
   const { account: a, snapshots } = data;
-  const f = serverFormat();
-  const t = today();
+  const f = serverFormat(uid);
+  const t = today(uid);
   const liability = isLiability(a.assetClass);
   const sign = liability ? -1 : 1;
   const partial = a.ownershipPct !== 100;
   const loan = a.loanParams;
 
   // Related accounts: the property a mortgage finances, or the mortgages on a property.
-  const others = listAccounts({ includeArchived: true }).filter((x) => x.id !== a.id);
+  const others = listAccounts(uid, { includeArchived: true }).filter((x) => x.id !== a.id);
   const properties = others.filter((x) => x.assetClass === "real_estate" && !x.archivedAt).map((x) => ({ id: x.id, name: x.name }));
   const financedProperty = a.type === "mortgage" && a.linkedAccountId ? others.find((x) => x.id === a.linkedAccountId) : undefined;
   const mortgages = a.assetClass === "real_estate" ? others.filter((x) => x.linkedAccountId === a.id && !x.archivedAt) : [];
@@ -66,7 +69,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
     const from = addDays(loan.startDate, -31);
     const dates = monthRange(from.slice(0, 7), addMonths(t.slice(0, 7), -1)).map(endOfMonth).filter((d) => d >= from);
     dates.push(t);
-    points = dates.map((d) => ({ date: d, netCents: balanceOnDate(a, snapshots, d).cents }));
+    const ctx = valuationContext(uid);
+    points = dates.map((d) => ({ date: d, netCents: balanceOnDate(a, snapshots, d, ctx).cents }));
   } else {
     points = snapshots.map((s) => ({ date: s.date, netCents: s.balanceCents }));
   }

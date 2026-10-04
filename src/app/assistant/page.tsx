@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { agentStatus } from "@/server/agent/runner";
 import { listConversations } from "@/server/agent/conversations";
 import { AssistantChat } from "@/components/assistant-chat";
+import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Assistant" };
@@ -13,9 +14,10 @@ const PROVIDER_LABELS = {
   none: "Disabled",
 };
 
-export default function AssistantPage() {
+export default async function AssistantPage() {
+  const uid = (await requireUser()).id;
   const status = agentStatus();
-  const conversations = listConversations(50).map((c) => ({
+  const conversations = listConversations(uid, 50).map((c) => ({
     id: c.id,
     title: c.title,
     provider: c.provider,

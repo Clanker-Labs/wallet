@@ -7,13 +7,14 @@ import { listCategories, listRules } from "@/server/services/categories";
 import { dataCounts, transactionCountsByCategory, uncategorizedCount } from "@/server/services/export";
 import { agentStatus } from "@/server/agent/runner";
 import { agentReadOnly, enabledTools } from "@/server/agent/tools";
-import { apiTokenEnabled, passwordEnabled } from "@/server/auth";
+import { apiTokenEnabled } from "@/server/auth";
 import { dbPath } from "@/server/db/client";
 import { Card, CardHeader, PageHeader } from "@/components/ui";
 import { Snippet } from "@/components/settings-kit";
 import { PreferencesForm } from "@/components/settings-preferences";
 import { CategoriesEditor, type CategoryItem } from "@/components/settings-categories";
 import { RulesEditor } from "@/components/settings-rules";
+import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Settings" };
@@ -29,23 +30,24 @@ const SECTIONS = [
 ] as const;
 
 export default async function SettingsPage() {
-  const prefs = getSettings();
-  const txCounts = transactionCountsByCategory();
-  const categories: CategoryItem[] = listCategories().map((c) => ({
+  const uid = (await requireUser()).id;
+  const prefs = getSettings(uid);
+  const txCounts = transactionCountsByCategory(uid);
+  const categories: CategoryItem[] = listCategories(uid).map((c) => ({
     id: c.id,
     name: c.name,
     kind: c.kind,
     icon: c.icon,
     txCount: txCounts[c.id] ?? 0,
   }));
-  const rules = listRules();
-  const uncategorized = uncategorizedCount();
+  const rules = listRules(uid);
+  const uncategorized = uncategorizedCount(uid);
 
   const agent = agentStatus();
   const toolCount = enabledTools().length;
   const readOnly = agentReadOnly();
   const tokenSet = apiTokenEnabled();
-  const passwordSet = passwordEnabled();
+  const passwordSet = true; // replaced by passkeys (see Security section)
 
   const h = await headers();
   const proto = (h.get("x-forwarded-proto") ?? "http").split(",")[0].trim();
@@ -54,7 +56,7 @@ export default async function SettingsPage() {
   const repo = process.cwd();
   const dbFile = path.resolve(dbPath());
   const dbEnv = process.env.WALLET_DB_PATH ? dbFile : null;
-  const counts = dataCounts();
+  const counts = dataCounts(uid);
   const timezones = Intl.supportedValuesOf("timeZone");
 
   const launcher = path.join(repo, "bin", "wallet-mcp.mjs");

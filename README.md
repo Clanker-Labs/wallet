@@ -8,12 +8,13 @@ Self-hosted · one SQLite file · passkey sign-in · MIT</p>
 
 <p align="center">
   <a href="https://clanker-labs.github.io/wallet/"><b>Docs & demos</b></a> ·
+  <a href="https://clanker-labs.github.io/wallet/media/demo.mp4">Full demo (video)</a> ·
   <a href="https://clanker-labs.github.io/wallet/getting-started.html">Get started</a> ·
   <a href="https://clanker-labs.github.io/wallet/architecture.html">How it works</a>
 </p>
 
 <p align="center">
-  <a href="https://clanker-labs.github.io/wallet/"><img src="site/media/net-worth.jpg" alt="wallet: net worth dashboard" width="880"></a>
+  <a href="https://clanker-labs.github.io/wallet/"><img src="site/media/promo.gif" alt="wallet in 20 seconds: net worth, accounts in any currency, investments" width="880"></a>
 </p>
 
 ## What it does

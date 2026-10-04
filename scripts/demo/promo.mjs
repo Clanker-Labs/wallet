@@ -76,7 +76,7 @@ export async function buildPromo() {
 
 /** README hero: the opening card, net worth and the assistant, as a light GIF. */
 export function buildGif() {
-  return gif(media("promo"), path.join(MEDIA, "promo.gif"), { start: 0, dur: 24, width: 880, fps: 10 });
+  return gif(media("promo"), path.join(MEDIA, "promo.gif"), { start: 0, dur: 21, width: 800, fps: 9 }); // < 5 MB for GitHub
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

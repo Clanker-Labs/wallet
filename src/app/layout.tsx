@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from "next";
+import { after } from "next/server";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
 import { GlobalDrop } from "@/components/global-drop";
 import { FormatProvider } from "@/components/format";
 import { DEFAULT_SETTINGS, getSettings } from "@/server/services/settings";
 import { currentUser } from "@/server/session";
+import { refreshMarketDataInBackground } from "@/server/services/market";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +38,8 @@ const themeScript = `try{var t=localStorage.getItem("wallet-theme");if(t)documen
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await currentUser();
   const { currency, locale } = user ? getSettings(user.id) : DEFAULT_SETTINGS();
+  // Rates, prices and holdings snapshots stay current without the Telegram worker (throttled, never blocks).
+  if (user) after(() => refreshMarketDataInBackground());
   return (
     <html lang="en" suppressHydrationWarning>
       <head>

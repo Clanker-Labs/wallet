@@ -29,8 +29,8 @@ Prices come from Yahoo Finance's public chart endpoint, without a key, and are s
 
 | When | What is refreshed |
 |---|---|
-| Opening **Investments** | In the background, at most every 30 minutes per server process, symbols not fetched in the last 6 hours. |
-| The worker, hourly | Same rule, then every user's holdings accounts get today's value snapshot. |
+| Any page load (web app) | In the background after the response, at most every 30 minutes per server process: exchange rates, then symbols not fetched in the last 6 hours, then every user's holdings accounts get today's value snapshot. |
+| The worker, hourly | The same refresh. |
 | **Refresh prices** (or the `refresh_prices` tool) | Every held symbol, now. |
 | Adding a position, or changing its symbol | That symbol: a year of history for a new one, the last 5 days for one the account already holds. |
 

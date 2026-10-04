@@ -2,26 +2,14 @@ import { and, desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "@/server/db/client";
 import { uploads, type Upload } from "@/server/db/schema";
+import { MAX_UPLOAD_BYTES, uploadKind } from "@/lib/uploads";
 
 /**
  * Files dropped into the assistant: bank exports (CSV, OFX/QIF, TXT), PDF
  * statements and screenshots. Stored in SQLite so a backup is one file.
  */
 
-export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
-
-export type UploadKind = "csv" | "text" | "pdf" | "image";
-
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-
-export function uploadKind(mimeType: string, filename: string): UploadKind | null {
-  const ext = filename.toLowerCase().split(".").pop() ?? "";
-  if (mimeType === "application/pdf" || ext === "pdf") return "pdf";
-  if (IMAGE_TYPES.has(mimeType) || ["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) return "image";
-  if (["csv", "tsv"].includes(ext) || mimeType === "text/csv") return "csv";
-  if (mimeType.startsWith("text/") || ["txt", "ofx", "qif", "qfx", "json", "md"].includes(ext)) return "text";
-  return null;
-}
+export { MAX_UPLOAD_BYTES, uploadKind, type UploadKind } from "@/lib/uploads";
 
 export function saveUpload(uid: string, file: { filename: string; mimeType: string; data: Buffer }): Upload {
   if (file.data.length > MAX_UPLOAD_BYTES) throw new Error(`File too large (max ${MAX_UPLOAD_BYTES / 1024 / 1024} MB)`);

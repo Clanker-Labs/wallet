@@ -72,6 +72,8 @@ function parseAccountForm(fd: FormData, mode: "create" | "edit"): { input?: Acco
   const input: AccountInput = {
     name,
     type,
+    // Validated by the service (3–6 letter code); empty keeps the default / current one.
+    currency: str(fd, "currency") || undefined,
     institution: str(fd, "institution") || null,
     ownershipPct: ownership ?? 100,
     includeInNetWorth: fd.get("includeInNetWorth") === "on",

@@ -6,9 +6,11 @@ Your data stays in one SQLite file on your machine. Sign in with a **passkey**, 
 
 ![Net worth dashboard](docs/dashboard.png)
 
-| Simulations | Assistant |
+| Investments | Assistant (drop a statement) |
 |---|---|
-| ![Mortgage simulator](docs/simulations.png) | ![Assistant answering from your data](docs/assistant.png) |
+| ![Holdings with live prices](docs/investments.png) | ![Assistant importing a dropped CSV](docs/assistant.png) |
+| **Simulations** | |
+| ![Mortgage simulator](docs/simulations.png) | |
 
 ## What it does
 

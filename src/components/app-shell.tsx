@@ -8,6 +8,7 @@ import {
   Bell,
   Bot,
   Calculator,
+  CandlestickChart,
   LayoutDashboard,
   Landmark,
   Menu,
@@ -15,14 +16,17 @@ import {
   PiggyBank,
   ReceiptText,
   Settings,
+  ShieldCheck,
   Sun,
   X,
 } from "lucide-react";
 import { Wordmark } from "./brand";
+import { SignOutButton } from "./passkey-auth";
 
 const NAV = [
   { href: "/", label: "Net worth", icon: LayoutDashboard },
   { href: "/accounts", label: "Accounts", icon: Landmark },
+  { href: "/investments", label: "Investments", icon: CandlestickChart },
   { href: "/budgets", label: "Budgets", icon: PiggyBank },
   { href: "/transactions", label: "Transactions", icon: ReceiptText },
   { href: "/simulations", label: "Simulations", icon: Calculator },
@@ -59,7 +63,38 @@ function ThemeToggle() {
   );
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export interface ShellUser {
+  name: string;
+}
+
+/** Signed-in user: initial, name, account security and sign out. */
+function UserBlock({ user }: { user: ShellUser }) {
+  const initial = user.name.trim().charAt(0).toUpperCase() || "?";
+  return (
+    <div className="flex items-center gap-2.5 px-1.5">
+      <span
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-tint text-sm font-semibold text-accent"
+        aria-hidden
+      >
+        {initial}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-ink" title={user.name}>
+          {user.name}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-muted">
+          <Link href="/settings#security" className="inline-flex items-center gap-1 hover:text-ink hover:underline">
+            <ShieldCheck size={12} aria-hidden /> Security
+          </Link>
+          <span aria-hidden>·</span>
+          <SignOutButton className="cursor-pointer hover:text-ink hover:underline" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function AppShell({ children, user = null }: { children: React.ReactNode; user?: ShellUser | null }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [pathname]);
@@ -100,12 +135,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Wordmark size={28} />
         </Link>
         {nav}
-        <div className="mt-auto flex items-center justify-between border-t border-border px-1 pt-3">
-          <span className="inline-flex items-center gap-1.5 text-xs text-muted">
-            <span className="h-1.5 w-1.5 rounded-full bg-gain" aria-hidden />
-            self-hosted
-          </span>
-          <ThemeToggle />
+        <div className="mt-auto border-t border-border pt-3">
+          {user && (
+            <div className="mb-3">
+              <UserBlock user={user} />
+            </div>
+          )}
+          <div className="flex items-center justify-between px-1">
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted">
+              <span className="h-1.5 w-1.5 rounded-full bg-gain" aria-hidden />
+              self-hosted
+            </span>
+            <ThemeToggle />
+          </div>
         </div>
       </aside>
 
@@ -127,7 +169,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         {open && (
-          <div className="absolute inset-x-0 top-full border-b border-border bg-surface p-3 shadow-pop">{nav}</div>
+          <div className="absolute inset-x-0 top-full border-b border-border bg-surface p-3 shadow-pop">
+            {nav}
+            {user && (
+              <div className="mt-3 border-t border-border pt-3">
+                <UserBlock user={user} />
+              </div>
+            )}
+          </div>
         )}
       </div>
 

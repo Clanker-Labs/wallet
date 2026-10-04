@@ -146,7 +146,7 @@ export function AllocationDonut({ slices, size = 180 }: { slices: Slice[]; size?
             outerRadius="100%"
             paddingAngle={data.length > 1 ? 1.5 : 0}
             stroke="var(--surface)"
-            strokeWidth={2}
+            strokeWidth={data.length > 1 ? 2 : 0}
             isAnimationActive={false}
           >
             {data.map((s) => (

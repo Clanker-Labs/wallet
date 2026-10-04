@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
+import { GlobalDrop } from "@/components/global-drop";
 import { FormatProvider } from "@/components/format";
 import { DEFAULT_SETTINGS, getSettings } from "@/server/services/settings";
 import { currentUser } from "@/server/session";
@@ -42,7 +43,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body>
         <FormatProvider value={{ currency, locale }}>
-          <AppShell>{children}</AppShell>
+          <AppShell user={user ? { name: user.name } : null}>{children}</AppShell>
+          {user && <GlobalDrop />}
         </FormatProvider>
       </body>
     </html>

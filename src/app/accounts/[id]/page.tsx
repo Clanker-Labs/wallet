@@ -1,13 +1,31 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Archive, ArrowLeft, ArchiveRestore } from "lucide-react";
+import { Archive, ArrowLeft, ArchiveRestore, ArrowRight, Plus } from "lucide-react";
 import { balanceOnDate, getAccount, listAccounts } from "@/server/services/accounts";
 import { today } from "@/server/services/settings";
 import { serverFormat } from "@/server/format";
-import { ACCOUNT_TYPES, ASSET_CLASS_LABELS, ASSET_CLASS_SLOT, isLiability } from "@/lib/domain";
+import {
+  ACCOUNT_TYPES,
+  ASSET_CLASS_LABELS,
+  ASSET_CLASS_SLOT,
+  COMMON_CURRENCIES,
+  HOLDING_ACCOUNT_TYPES,
+  isLiability,
+} from "@/lib/domain";
 import { addDays, addMonths, endOfMonth, formatDate, formatMonth, monthRange } from "@/lib/dates";
 import { monthlyPayment, paymentsMade } from "@/lib/finance/loan";
-import { Badge, Button, Card, CardHeader, Delta, SeriesDot, Stat } from "@/components/ui";
+import { Badge, Button, ButtonLink, Card, CardHeader, Delta, SeriesDot, Stat } from "@/components/ui";
+import { FormatProvider } from "@/components/format";
+import {
+  HOLDING_TYPE_SLOT,
+  formatQuantity,
+  holdingTypeLabel,
+  moneyIn,
+  priceIn,
+  priceState,
+  relativeDay,
+} from "@/components/investments-model";
+import { listHoldings } from "@/server/services/holdings";
 import { NetWorthChart } from "@/components/charts";
 import { AccountForm } from "@/components/accounts-form";
 import { ConfirmButton, DeleteAccountForm, Disclosure, RecordBalanceForm } from "@/components/accounts-ui";
@@ -40,6 +58,7 @@ const SOURCE_LABELS: Record<string, string> = {
   telegram: "Telegram",
   agent: "assistant",
   demo: "demo",
+  holdings: "market prices",
 };
 
 const RECORDS_SHOWN = 12;
@@ -56,12 +75,17 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const sign = liability ? -1 : 1;
   const partial = a.ownershipPct !== 100;
   const loan = a.loanParams;
+  const foreign = a.currency !== f.currency;
+  /** Amounts of this account, in its own currency. */
+  const native = (cents: number, opts: { whole?: boolean } = {}) => moneyIn(cents, a.currency, f.locale, opts);
+  const holdings = a.valuedByHoldings ? listHoldings(uid, { accountId: a.id }) : [];
 
   // Related accounts: the property a mortgage finances, or the mortgages on a property.
   const others = listAccounts(uid, { includeArchived: true }).filter((x) => x.id !== a.id);
   const properties = others.filter((x) => x.assetClass === "real_estate" && !x.archivedAt).map((x) => ({ id: x.id, name: x.name }));
   const financedProperty = a.type === "mortgage" && a.linkedAccountId ? others.find((x) => x.id === a.linkedAccountId) : undefined;
   const mortgages = a.assetClass === "real_estate" ? others.filter((x) => x.linkedAccountId === a.id && !x.archivedAt) : [];
+  const currencies = [...new Set<string>([...COMMON_CURRENCIES, ...others.map((x) => x.currency), a.currency])];
 
   // Chart: snapshots as recorded, or a monthly series off the amortization schedule for loans.
   let points: { date: string; netCents: number }[];
@@ -100,6 +124,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
     name: a.name,
     institution: a.institution,
     type: a.type,
+    currency: a.currency,
     ownershipPct: a.ownershipPct,
     includeInNetWorth: a.includeInNetWorth,
     linkedAccountId: a.linkedAccountId,
@@ -128,18 +153,23 @@ export default async function AccountPage({ params, searchParams }: Props) {
           </div>
         </div>
         <div className="text-left sm:text-right">
-          <div className="tabular text-3xl font-semibold tracking-tight">{f.money(sign * a.ownedCents)}</div>
+          <div className="tabular text-3xl font-semibold tracking-tight">{native(sign * a.ownedCents)}</div>
+          {foreign && (
+            <div className="tabular mt-0.5 text-sm text-muted">≈ {f.money(sign * a.baseOwnedCents)}</div>
+          )}
           <div className="mt-0.5 text-xs text-muted">
             {partial && (
               <>
-                your {+a.ownershipPct.toFixed(2)}% of <span className="tabular">{f.money(sign * a.balanceCents)}</span> ·{" "}
+                your {+a.ownershipPct.toFixed(2)}% of <span className="tabular">{native(sign * a.balanceCents)}</span> ·{" "}
               </>
             )}
             {a.derivedFromLoan
               ? "from the amortization schedule"
-              : a.lastUpdated
-                ? `as of ${formatDate(a.lastUpdated)}`
-                : "no balance yet"}
+              : a.valuedByHoldings
+                ? `market value${a.lastUpdated ? `, prices as of ${formatDate(a.lastUpdated)}` : ""}`
+                : a.lastUpdated
+                  ? `as of ${formatDate(a.lastUpdated)}`
+                  : "no balance yet"}
           </div>
         </div>
       </div>
@@ -150,7 +180,9 @@ export default async function AccountPage({ params, searchParams }: Props) {
             <>
               Finances <Link href={`/accounts/${financedProperty.id}`} className="font-medium text-ink hover:underline">{financedProperty.name}</Link>{" "}
               · your equity in it:{" "}
-              <span className="tabular font-medium text-ink">{f.money(financedProperty.ownedCents - a.ownedCents, { whole: true })}</span>
+              <span className="tabular font-medium text-ink">
+                {f.money(financedProperty.baseOwnedCents - a.baseOwnedCents, { whole: true })}
+              </span>
             </>
           ) : (
             <>
@@ -163,7 +195,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
               ))}{" "}
               · your equity:{" "}
               <span className="tabular font-medium text-ink">
-                {f.money(a.ownedCents - mortgages.reduce((s, m) => s + m.ownedCents, 0), { whole: true })}
+                {f.money(a.baseOwnedCents - mortgages.reduce((s, m) => s + m.baseOwnedCents, 0), { whole: true })}
               </span>
             </>
           )}
@@ -180,13 +212,68 @@ export default async function AccountPage({ params, searchParams }: Props) {
           <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
             <Stat
               label="Monthly payment"
-              value={f.money(loanStats.monthlyCents)}
-              delta={loanStats.insuranceCents > 0 ? <span className="text-muted">incl. {f.money(loanStats.insuranceCents)} insurance</span> : undefined}
+              value={native(loanStats.monthlyCents)}
+              delta={loanStats.insuranceCents > 0 ? <span className="text-muted">incl. {native(loanStats.insuranceCents)} insurance</span> : undefined}
             />
-            <Stat label="Borrowed" value={f.money(Math.round(loan.principal * 100), { whole: true })} delta={<span className="text-muted">at {loan.annualRatePct}%</span>} />
+            <Stat label="Borrowed" value={native(Math.round(loan.principal * 100), { whole: true })} delta={<span className="text-muted">at {loan.annualRatePct}%</span>} />
             <Stat label="Payments made" value={`${loanStats.made} / ${loan.durationMonths}`} delta={<span className="text-muted">{loanStats.left} to go</span>} />
             <Stat label="Paid off" value={formatMonth(loanStats.endMonth)} delta={<span className="text-muted">first payment {formatDate(loan.startDate)}</span>} />
           </div>
+        </Card>
+      ) : a.valuedByHoldings ? (
+        <Card>
+          <CardHeader
+            title="Holdings"
+            subtitle={`The balance is the market value of ${holdings.length === 1 ? "this position" : `these ${holdings.length} positions`}: nothing to record.`}
+            action={
+              <div className="flex shrink-0 gap-1">
+                {!a.archivedAt && (
+                  <ButtonLink href={`/investments?addTo=${a.id}`} size="sm" variant="ghost" aria-label="Add a holding" title="Add a holding" className="w-8 px-0">
+                    <Plus size={15} />
+                  </ButtonLink>
+                )}
+                <ButtonLink href={`/investments?account=${a.id}`} size="sm" variant="ghost">
+                  Manage <ArrowRight size={14} />
+                </ButtonLink>
+              </div>
+            }
+          />
+          <ul className="divide-y divide-border">
+            {holdings.map((h) => {
+              const state = priceState(h, t);
+              return (
+                <li key={h.id} className="flex items-start gap-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="font-medium break-words">{h.symbol ?? h.name}</span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-2">
+                        <SeriesDot slot={HOLDING_TYPE_SLOT[h.assetType]} />
+                        {holdingTypeLabel(h.assetType)}
+                      </span>
+                      {state === "manual" && <Badge>manual price</Badge>}
+                      {state === "missing" && <Badge tone="warning">no price</Badge>}
+                      {state === "stale" && h.priceDate && <Badge tone="warning">price {relativeDay(h.priceDate, t)}</Badge>}
+                    </div>
+                    <div className="tabular mt-0.5 truncate text-xs text-muted">
+                      {formatQuantity(h.quantity, f.locale)} × {h.unitPrice === null ? "—" : priceIn(h.unitPrice, h.currency, f.locale)}
+                      {h.symbol && h.name !== h.symbol && <> · {h.name}</>}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right text-sm">
+                    <div className="tabular font-semibold">{h.unitPrice === null ? "—" : moneyIn(h.valueCents, h.currency, f.locale)}</div>
+                    {h.gainCents !== null && (
+                      <div className="text-xs">
+                        <Delta value={h.gainCents}>
+                          {moneyIn(h.gainCents, h.currency, f.locale, { signed: true, whole: Math.abs(h.gainCents) >= 100_000 })}
+                          {h.gainPct !== null && ` (${h.gainPct >= 0 ? "+" : ""}${h.gainPct.toFixed(1)}%)`}
+                        </Delta>
+                      </div>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </Card>
       ) : a.archivedAt ? (
         <Card>
@@ -194,16 +281,37 @@ export default async function AccountPage({ params, searchParams }: Props) {
         </Card>
       ) : (
         <Card>
-          <CardHeader title="Record a balance" subtitle="Same day twice? The latest one wins." />
+          <CardHeader
+            title="Record a balance"
+            subtitle={
+              HOLDING_ACCOUNT_TYPES.includes(a.type) ? (
+                <>
+                  In {a.currency}. Or{" "}
+                  <Link href={`/investments?addTo=${a.id}`} className="text-accent hover:underline">
+                    add its positions
+                  </Link>{" "}
+                  and it follows market prices.
+                </>
+              ) : (
+                `In ${a.currency}. Same day twice? The latest one wins.`
+              )
+            }
+          />
           <RecordBalanceForm accountId={a.id} today={t} liability={liability} />
         </Card>
       )}
 
       {/* History */}
       <Card>
-        <CardHeader title={liability ? "Amount owed over time" : "Balance over time"} subtitle={partial ? "Full balance (100%)" : undefined} />
+        <CardHeader
+          title={liability ? "Amount owed over time" : "Balance over time"}
+          subtitle={[partial && "Full balance (100%)", foreign && `In ${a.currency}`].filter(Boolean).join(" · ") || undefined}
+        />
         {points.length >= 2 ? (
-          <NetWorthChart points={points} height={240} />
+          // The chart formats with the context currency: this account's own (Intl needs a 3-letter code).
+          <FormatProvider value={{ currency: /^[A-Z]{3}$/.test(a.currency) ? a.currency : f.currency, locale: f.locale }}>
+            <NetWorthChart points={points} height={240} />
+          </FormatProvider>
         ) : (
           <p className="text-sm text-ink-2">Record a balance from time to time (monthly is plenty) and the trend shows up here.</p>
         )}
@@ -230,13 +338,13 @@ export default async function AccountPage({ params, searchParams }: Props) {
                       {formatDate(s.date)}
                       {s.note && <div className="max-w-[16rem] truncate text-xs text-muted">{s.note}</div>}
                     </td>
-                    <td className="tabular py-2 pr-3 text-right font-medium whitespace-nowrap">{f.money(s.balanceCents)}</td>
+                    <td className="tabular py-2 pr-3 text-right font-medium whitespace-nowrap">{native(s.balanceCents)}</td>
                     <td className="py-2 pr-3 text-right text-xs whitespace-nowrap">
                       {s.changeCents === null ? (
                         <span className="text-muted">—</span>
                       ) : (
                         <Delta value={s.changeCents} invert={liability}>
-                          {f.money(Math.abs(s.changeCents), { whole: Math.abs(s.changeCents) >= 100_000 })}
+                          {native(Math.abs(s.changeCents), { whole: Math.abs(s.changeCents) >= 100_000 })}
                         </Delta>
                       )}
                     </td>
@@ -261,7 +369,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
       <Card className="py-3">
         <Disclosure summaryClassName="py-1" summary={<span className="text-sm font-semibold">Edit details</span>}>
           <div className="pt-4 pb-2">
-            <AccountForm account={formValues} properties={properties} />
+            <AccountForm account={formValues} properties={properties} currencies={currencies} baseCurrency={f.currency} />
           </div>
         </Disclosure>
       </Card>

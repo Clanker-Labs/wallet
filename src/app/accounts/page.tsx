@@ -3,11 +3,20 @@ import { Archive, Plus, X } from "lucide-react";
 import { listAccounts, type AccountWithBalance } from "@/server/services/accounts";
 import { today } from "@/server/services/settings";
 import { serverFormat } from "@/server/format";
-import { ACCOUNT_TYPES, ASSET_CLASSES, ASSET_CLASS_LABELS, ASSET_CLASS_SLOT, isLiability } from "@/lib/domain";
+import {
+  ACCOUNT_TYPES,
+  ASSET_CLASSES,
+  ASSET_CLASS_LABELS,
+  ASSET_CLASS_SLOT,
+  COMMON_CURRENCIES,
+  isLiability,
+  type AccountType,
+} from "@/lib/domain";
 import { formatDate } from "@/lib/dates";
 import { Badge, Button, ButtonLink, Card, CardHeader, EmptyState, PageHeader, SeriesDot } from "@/components/ui";
 import { AccountForm } from "@/components/accounts-form";
 import { BalanceUpdater, Disclosure } from "@/components/accounts-ui";
+import { moneyIn } from "@/components/investments-model";
 import { unarchiveAccountAction } from "./actions";
 import { requireUser } from "@/server/session";
 
@@ -28,7 +37,7 @@ function updatedLabel(days: number | null) {
   return `updated ${Math.round(days / 30)} months ago`;
 }
 
-export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
+export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ new?: string; type?: string }> }) {
   const uid = (await requireUser()).id;
   const params = await searchParams;
   const f = serverFormat(uid);
@@ -38,15 +47,19 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   const archived = all.filter((a) => a.archivedAt);
   const properties = active.filter((a) => a.assetClass === "real_estate").map((a) => ({ id: a.id, name: a.name }));
   const adding = params.new === "1" || active.length === 0;
+  // /accounts?new=1&type=brokerage (links from Investments) preselects the type.
+  const defaultType = params.type && params.type in ACCOUNT_TYPES ? (params.type as AccountType) : undefined;
+  const currencies = [...new Set<string>([...COMMON_CURRENCIES, ...all.map((a) => a.currency)])];
 
+  // Totals are in the base currency; rows show each account in its own.
   const counted = active.filter((a) => a.includeInNetWorth);
-  const assetsCents = counted.filter((a) => !isLiability(a.assetClass)).reduce((s, a) => s + a.ownedCents, 0);
-  const liabilitiesCents = counted.filter((a) => isLiability(a.assetClass)).reduce((s, a) => s + a.ownedCents, 0);
+  const assetsCents = counted.filter((a) => !isLiability(a.assetClass)).reduce((s, a) => s + a.baseOwnedCents, 0);
+  const liabilitiesCents = counted.filter((a) => isLiability(a.assetClass)).reduce((s, a) => s + a.baseOwnedCents, 0);
   const netCents = assetsCents - liabilitiesCents;
 
   const groups = ASSET_CLASSES.map((c) => {
     const accounts = active.filter((a) => a.assetClass === c);
-    const totalCents = accounts.filter((a) => a.includeInNetWorth).reduce((s, a) => s + a.ownedCents, 0);
+    const totalCents = accounts.filter((a) => a.includeInNetWorth).reduce((s, a) => s + a.baseOwnedCents, 0);
     return { key: c, label: ASSET_CLASS_LABELS[c], accounts, totalCents };
   }).filter((g) => g.accounts.length > 0);
 
@@ -83,7 +96,13 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
               )
             }
           />
-          <AccountForm properties={properties} autoFocus />
+          <AccountForm
+            properties={properties}
+            currencies={currencies}
+            baseCurrency={f.currency}
+            defaultType={defaultType}
+            autoFocus
+          />
         </Card>
       )}
 
@@ -119,7 +138,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                 </div>
                 <ul className="divide-y divide-border">
                   {g.accounts.map((a) => (
-                    <AccountRow key={a.id} a={a} t={t} money={f.money} />
+                    <AccountRow key={a.id} a={a} t={t} base={f.currency} locale={f.locale} />
                   ))}
                 </ul>
               </Card>
@@ -129,7 +148,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
           <Card>
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
-                <div className="text-sm text-muted">Net worth</div>
+                <div className="text-sm text-muted">Net worth · {f.currency}</div>
                 <div className="tabular mt-1 text-3xl font-semibold tracking-tight">{f.money(netCents, { whole: true })}</div>
               </div>
               <div className="flex gap-6 text-sm">
@@ -193,25 +212,19 @@ function shortTypeLabel(type: AccountWithBalance["type"]) {
 }
 
 function isStale(a: AccountWithBalance, t: string) {
-  if (a.derivedFromLoan || !a.includeInNetWorth) return false;
+  if (a.derivedFromLoan || a.valuedByHoldings || !a.includeInNetWorth) return false;
   return a.lastUpdated === null || daysBetween(a.lastUpdated, t) > STALE_DAYS;
 }
 
-function AccountRow({
-  a,
-  t,
-  money,
-}: {
-  a: AccountWithBalance;
-  t: string;
-  money: ReturnType<typeof serverFormat>["money"];
-}) {
+function AccountRow({ a, t, base, locale }: { a: AccountWithBalance; t: string; base: string; locale: string }) {
   const liability = isLiability(a.assetClass);
   const sign = liability ? -1 : 1;
   const days = a.lastUpdated ? daysBetween(a.lastUpdated, t) : null;
   const stale = isStale(a, t);
   const partial = a.ownershipPct !== 100;
+  const foreign = a.currency !== base;
   const meta = [a.institution, shortTypeLabel(a.type)].filter(Boolean).join(" · ");
+  const native = (cents: number) => moneyIn(cents, a.currency, locale, { whole: true });
 
   return (
     <li className="flex items-center gap-3 py-3">
@@ -225,8 +238,11 @@ function AccountRow({
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted">
           {meta && <span>{meta}</span>}
-          {meta && !a.derivedFromLoan && <span aria-hidden>·</span>}
-          {a.derivedFromLoan ? null : stale ? (
+          {meta && !a.derivedFromLoan && !(a.valuedByHoldings && !days) && <span aria-hidden>·</span>}
+          {a.derivedFromLoan ? null : a.valuedByHoldings ? (
+            // Valued live from holdings: only an old price is worth a mention.
+            days ? <span>prices {updatedLabel(days).replace("updated ", "")}</span> : null
+          ) : stale ? (
             <Badge tone="warning">{updatedLabel(days)}</Badge>
           ) : (
             <span>{updatedLabel(days)}</span>
@@ -234,14 +250,28 @@ function AccountRow({
         </div>
       </div>
       <div className="shrink-0 text-right">
-        <div className="tabular font-semibold">{money(sign * a.ownedCents, { whole: true })}</div>
-        {partial && <div className="tabular text-xs text-muted">of {money(sign * a.balanceCents, { whole: true })}</div>}
+        <div className="tabular font-semibold">{native(sign * a.ownedCents)}</div>
+        {partial && <div className="tabular text-xs text-muted">of {native(sign * a.balanceCents)}</div>}
+        {foreign && (
+          <div className="tabular text-xs text-muted" title={`Your share in ${base}`}>
+            ≈ {moneyIn(sign * a.baseOwnedCents, base, locale, { whole: true })}
+          </div>
+        )}
       </div>
       <div className="flex w-[5.5rem] shrink-0 justify-end sm:w-28">
         {a.derivedFromLoan ? (
           <span className="text-right text-xs text-muted" title="The balance follows the amortization schedule">
             auto · amortizing
           </span>
+        ) : a.valuedByHoldings ? (
+          <Link
+            href={`/investments?account=${a.id}`}
+            className="text-right text-xs leading-snug text-accent hover:underline"
+            title="Its balance is the market value of its positions"
+          >
+            <span className="block">Valued from</span>
+            {a.holdingsCount} holding{a.holdingsCount === 1 ? "" : "s"}
+          </Link>
         ) : (
           <BalanceUpdater accountId={a.id} />
         )}

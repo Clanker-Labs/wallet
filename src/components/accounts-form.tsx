@@ -2,10 +2,12 @@
 
 import { useState, useTransition } from "react";
 import { Check } from "lucide-react";
+import Link from "next/link";
 import {
   ACCOUNT_TYPES,
   ASSET_CLASSES,
   ASSET_CLASS_LABELS,
+  HOLDING_ACCOUNT_TYPES,
   assetClassFor,
   type AccountType,
   type LoanParams,
@@ -19,6 +21,7 @@ export interface AccountFormValues {
   name: string;
   institution: string | null;
   type: AccountType;
+  currency: string;
   ownershipPct: number;
   includeInNetWorth: boolean;
   linkedAccountId: number | null;
@@ -48,6 +51,29 @@ export function AccountTypeSelect({ value, onChange }: { value: AccountType; onC
   );
 }
 
+/** Currency picker: common codes plus any already in use, current value always present. */
+export function CurrencySelect({
+  value,
+  onChange,
+  currencies,
+  ...rest
+}: {
+  value: string;
+  onChange: (c: string) => void;
+  currencies: string[];
+} & Omit<React.ComponentProps<"select">, "value" | "onChange">) {
+  const options = currencies.includes(value) ? currencies : [value, ...currencies];
+  return (
+    <Select name="currency" value={value} onChange={(e) => onChange(e.target.value)} {...rest}>
+      {options.map((c) => (
+        <option key={c} value={c}>
+          {c}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
 export function FormStatus({ state }: { state: AccountActionState | null }) {
   return (
     <span aria-live="polite" className="text-sm">
@@ -70,20 +96,30 @@ export function FormStatus({ state }: { state: AccountActionState | null }) {
 export function AccountForm({
   account,
   properties,
+  currencies,
+  baseCurrency,
+  defaultType = "checking",
   autoFocus = false,
 }: {
   account?: AccountFormValues;
   properties: { id: number; name: string }[];
+  /** Offered in the currency picker (common ones + those in use). */
+  currencies: string[];
+  /** New accounts default to it. */
+  baseCurrency: string;
+  defaultType?: AccountType;
   autoFocus?: boolean;
 }) {
   const editing = Boolean(account);
-  const [type, setType] = useState<AccountType>(account?.type ?? "checking");
+  const [type, setType] = useState<AccountType>(account?.type ?? defaultType);
+  const [currency, setCurrency] = useState(account?.currency ?? baseCurrency);
   const [state, setState] = useState<AccountActionState | null>(null);
   const [formKey, setFormKey] = useState(0);
   const [pending, start] = useTransition();
 
   const liability = assetClassFor(type) === "liabilities";
   const isLoan = type === "mortgage" || type === "loan";
+  const holdsPositions = HOLDING_ACCOUNT_TYPES.includes(type);
   const loan = account?.loanParams;
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -125,7 +161,7 @@ export function AccountForm({
   return (
     <form key={formKey} onSubmit={onSubmit} className="space-y-4 text-sm">
       {account && <input type="hidden" name="id" value={account.id} />}
-      <div className={editing ? "grid gap-3 sm:grid-cols-3" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"}>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Name">
           <Input
             name="name"
@@ -149,12 +185,35 @@ export function AccountForm({
         <Field label="Type">
           <AccountTypeSelect value={type} onChange={setType} />
         </Field>
-        {!editing && (
+        {editing ? (
+          <Field
+            label="Currency"
+            hint={currency !== account!.currency ? "Past balances keep their numbers: they aren't converted" : undefined}
+          >
+            <CurrencySelect value={currency} onChange={setCurrency} currencies={currencies} />
+          </Field>
+        ) : (
           <Field
             label={liability ? "Amount owed today" : "Balance today"}
-            hint={isLoan ? "Or fill the loan details below" : undefined}
+            hint={
+              isLoan ? (
+                "Or fill the loan details below"
+              ) : holdsPositions ? (
+                <>
+                  Or leave empty and add its positions on{" "}
+                  <Link href="/investments" className="hover:text-ink hover:underline">
+                    Investments
+                  </Link>
+                </>
+              ) : undefined
+            }
           >
-            <Input name="balance" inputMode="decimal" placeholder="1 234,56" autoComplete="off" />
+            <div className="flex gap-2">
+              <Input name="balance" inputMode="decimal" placeholder="1 234,56" autoComplete="off" className="min-w-0" />
+              <div className="w-[6.5rem] shrink-0">
+                <CurrencySelect value={currency} onChange={setCurrency} currencies={currencies} aria-label="Currency" />
+              </div>
+            </div>
           </Field>
         )}
       </div>

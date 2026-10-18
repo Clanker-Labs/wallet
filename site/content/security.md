@@ -81,12 +81,20 @@ One install can host several people, each with a private wallet:
 - Telegram chats are linked one-to-one to a user ([Telegram bot internals](telegram-bot.html#linking-a-chat)); a chat that isn't linked gets nothing but its chat id.
 - `prices` and `fx_rates` are shared market data with no personal information.
 
+## Broker credentials
+
+Brokerage API keys ([Brokerage sync](investments.html#brokerage-sync)) are the only third-party secrets wallet stores ([src/server/secrets.ts](gh:src/server/secrets.ts)):
+
+- They are encrypted with AES-256-GCM in `broker_connections.credentials`. The key is `WALLET_SECRET_KEY` when set, otherwise a random key generated once into `secret.key` next to the database (mode 0600). With the key file, a copy of the data directory can decrypt them; set the variable to keep the two apart.
+- They are written from Settings only, after the broker accepted them, and never sent back: the page, the agent tools (`list_connections`) and the JSON export see the connection without its credentials, and the SQL sandbox has no `broker_connections` table.
+- Connectors are read-only by contract ([src/server/connectors](gh:src/server/connectors)): they only `GET` account, portfolio and instrument data. Give the broker key read permissions only, and even a leaked key can't trade.
+
 ## The SQL sandbox
 
 `query_sql` lets the assistant run arbitrary `SELECT`s for analysis the other tools don't cover. It never touches the real database ([src/server/agent/sql-sandbox.ts](gh:src/server/agent/sql-sandbox.ts)):
 
 - A private **in-memory** SQLite database is built per user with the same DDL, holding only that user's rows of `accounts`, `holdings`, `categories`, `category_rules`, `budgets`, `transactions`, `reminders`, `simulations` and `settings`; their `balance_snapshots` (joined through accounts); `prices` for the symbols they hold; and `fx_rates` for the currencies they use (plus USD and their base currency).
-- `users`, `sessions`, `passkeys`, `auth_challenges`, `uploads` and the agent tables don't exist there.
+- `users`, `sessions`, `passkeys`, `auth_challenges`, `uploads`, `broker_connections` and the agent tables don't exist there.
 - Only one statement is accepted, and better-sqlite3 must report it as a read-only reader (`stmt.reader && stmt.readonly`), so `INSERT`, `UPDATE`, `ATTACH`, `PRAGMA` writes and the like are refused. At most 500 rows come back.
 - The copy is cached for 15 seconds to serve a burst of queries, and dropped after any write tool.
 

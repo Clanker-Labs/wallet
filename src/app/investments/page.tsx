@@ -494,6 +494,7 @@ function HoldingRowView({
 }) {
   const state = priceState(r, today);
   const title = r.symbol ?? r.name;
+  const synced = r.connectionId !== null;
   const qty = formatQuantity(r.quantity, locale);
   const price = r.unitPrice === null ? "—" : priceIn(r.unitPrice, r.currency, locale);
   const value = r.unitPrice === null ? "—" : moneyIn(r.valueCents, r.currency, locale);
@@ -535,7 +536,12 @@ function HoldingRowView({
               <SeriesDot slot={HOLDING_TYPE_SLOT[r.assetType]} />
               {holdingTypeLabel(r.assetType)}
             </span>
-            {state === "manual" && <Badge>manual price</Badge>}
+            {synced && (
+              <span title="Synced from your brokerage: the next sync overwrites it, so change it there">
+                <Badge tone="accent">synced</Badge>
+              </span>
+            )}
+            {state === "manual" && !synced && <Badge>manual price</Badge>}
             {state === "missing" && (
               <span title={r.symbol ? "No price fetched for this symbol yet: refresh, check the symbol, or set a manual price" : "Set a manual price"}>
                 <Badge tone="warning">no price</Badge>
@@ -576,7 +582,7 @@ function HoldingRowView({
         </div>
 
         <div role="cell" className="flex shrink-0 flex-col items-end gap-1 lg:flex-row lg:justify-end">
-          {editing ? (
+          {synced ? null : editing ? (
             <Link
               href={hrefFor(filterId)}
               scroll={false}
@@ -597,11 +603,11 @@ function HoldingRowView({
               <Pencil size={14} />
             </Link>
           )}
-          <ConfirmButton action={deleteHoldingAction} fields={{ id: r.id }} title={`Delete ${title}`} />
+          {!synced && <ConfirmButton action={deleteHoldingAction} fields={{ id: r.id }} title={`Delete ${title}`} />}
         </div>
       </div>
 
-      {editing && (
+      {editing && !synced && (
         <div className="mt-3 rounded-xl border border-border bg-surface-2/50 p-4">
           <HoldingForm
             accounts={pickable.some((p) => p.id === r.accountId) ? pickable : [...pickable, ...accountOption(r)]}

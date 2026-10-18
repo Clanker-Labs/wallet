@@ -154,9 +154,48 @@ export const holdings = sqliteTable(
     costBasis: real("cost_basis"),
     /** Price per unit used when there is no market symbol (or to override it). */
     manualPrice: real("manual_price"),
+    /** Set when a broker connection owns this position: the next sync overwrites it. */
+    connectionId: integer("connection_id").references(() => brokerConnections.id, { onDelete: "set null" }),
+    /** The broker's own id for the position (Trading 212 ticker), unique per connection. */
+    externalId: text("external_id"),
     createdAt: createdAt(),
   },
-  (t) => [index("holdings_account").on(t.accountId), index("holdings_user").on(t.userId)],
+  (t) => [
+    index("holdings_account").on(t.accountId),
+    index("holdings_user").on(t.userId),
+    uniqueIndex("holdings_connection_external").on(t.connectionId, t.externalId),
+  ],
+);
+
+/**
+ * A read-only link to a brokerage (Trading 212…). Each sync replaces the
+ * positions and cash of `accountId` with what the broker reports. Credentials
+ * are encrypted at rest (`src/server/secrets.ts`) and never leave the server:
+ * this table is deliberately absent from exports and the agent's SQL sandbox.
+ */
+export const brokerConnections = sqliteTable(
+  "broker_connections",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: userId(),
+    /** Connector id from `src/server/connectors` (e.g. "trading212"). */
+    provider: text("provider").notNull(),
+    /** Connector-specific environment, e.g. "live" or "demo". */
+    environment: text("environment").notNull(),
+    /** Wallet account the broker's positions are written into. */
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    /** The broker's id for the account, to refuse connecting the same one twice. */
+    externalAccountId: text("external_account_id"),
+    /** Encrypted JSON of the connector's credential fields. */
+    credentials: text("credentials").notNull(),
+    lastSyncAt: integer("last_sync_at", { mode: "timestamp_ms" }),
+    lastSyncOk: integer("last_sync_ok", { mode: "boolean" }),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("broker_connections_user").on(t.userId), uniqueIndex("broker_connections_account").on(t.accountId)],
 );
 
 /** Daily closing prices per market symbol (shared by all users). */
@@ -361,3 +400,4 @@ export type Reminder = typeof reminders.$inferSelect;
 export type Budget = typeof budgets.$inferSelect;
 export type Simulation = typeof simulations.$inferSelect;
 export type Upload = typeof uploads.$inferSelect;
+export type BrokerConnection = typeof brokerConnections.$inferSelect;

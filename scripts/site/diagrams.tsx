@@ -88,7 +88,7 @@ function Architecture() {
 
       <Lane y={236} label="AGENT" />
       <Box x={100} y={208} w={130} h={56} title="Model backends" sub="Claude API," sub2="claude · codex CLI" tone="muted" />
-      <Box x={266} y={208} w={482} h={56} title="Tool registry · 34 tools" sub="src/server/agent/tools.ts → Claude API loop, CLI providers, MCP, /api/tools" tone="gold" />
+      <Box x={266} y={208} w={482} h={56} title="Tool registry · 36 tools" sub="src/server/agent/tools.ts → Claude API loop, CLI providers, MCP, /api/tools" tone="gold" />
       <Arrow d="M264,236 L232,236" />
       <Arrow d="M341,168 L341,206" label="/api/agent · tools · mcp" lx={348} ly={192} />
       <Arrow d="M507,168 L507,206" />

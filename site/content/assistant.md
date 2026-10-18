@@ -7,7 +7,7 @@ order: 7
 video: assistant
 ---
 
-The assistant is a chat at `/assistant` (and in Telegram) that works on your data through the same [34 tools](tools.html) you can call yourself. It answers with figures from tool results, never from memory, and it can make changes: import transactions, record balances, add holdings, set budgets, create reminders.
+The assistant is a chat at `/assistant` (and in Telegram) that works on your data through the same [36 tools](tools.html) you can call yourself. It answers with figures from tool results, never from memory, and it can make changes: import transactions, record balances, add holdings, set budgets, create reminders.
 
 ## Asking
 

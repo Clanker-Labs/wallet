@@ -24,7 +24,7 @@ export interface UploadedFile {
 
 /** POST /api/agent accepts at most this many attachments per message. */
 export const MAX_ATTACHMENTS = 10;
-export const UPLOAD_ACCEPT = ".csv,.tsv,.txt,.pdf,image/*,.ofx,.qif";
+export const UPLOAD_ACCEPT = ".csv,.tsv,.txt,.pdf,image/*,.ofx,.qif,.qfx";
 
 /** Upload kind from a name and type, by the same rules as the server. */
 export function guessKind(filename: string, mimeType = ""): UploadKind | null {

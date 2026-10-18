@@ -24,6 +24,8 @@ Amounts are **signed**: negative is money out, positive is money in.
 2. **Map and check.** Choose the date and description columns and either **one signed amount** column or separate **debit / credit** columns. The guesses cover English and French headers (`Date`, `Libellé`, `Montant`, `Débit`, `Crédit`, `Amount`, `Payee`…). Set the date format (auto, day-month-year, month-day-year, year-month-day), **invert signs** for banks that export spending as positive numbers, and pick the account and currency the rows belong to (the account's currency by default). A live preview shows the parsed rows.
 3. **Import.** The file is sent gzipped when the browser can (5 MB limit after decompression) and the server **parses it again**: the browser preview is never trusted. The result tells you how many rows were inserted, skipped as duplicates, auto-categorized, skipped as unreadable, and still uncategorized.
 
+**Not a CSV?** Drop it here anyway. PDF statements, OFX/QIF/QFX files, screenshots, CSVs without a clear header row and batches of several files are handed to the assistant in one click, and it imports them. Excel and Numbers files get a prompt to export as CSV first: neither the wizard nor the assistant reads spreadsheets yet.
+
 Amounts understand `1,234.56`, `1 234,56`, currency symbols, trailing minus signs (`12,00-`) and parentheses for negatives. Rows with an unreadable date or no amount are skipped.
 
 ### Re-imports are safe

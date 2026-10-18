@@ -2,9 +2,12 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { useMemo, useRef, useState, useTransition } from "react";
-import { AlertTriangle, ArrowLeft, Check, FileText, Loader2, Tag, Upload } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useMemo, useRef, useState, useTransition, type ReactNode } from "react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, FileText, Loader2, Sparkles, Tag, Upload } from "lucide-react";
 import { applyMapping, guessMapping, parseCsv, type CsvMapping, type ParsedCsv } from "@/lib/csv-import";
+import { importRoute, uploadKind } from "@/lib/uploads";
+import { formatBytes, KindIcon, UPLOAD_ACCEPT, uploadFile } from "@/components/assistant-uploads";
 import { formatDate } from "@/lib/dates";
 import { Button, ButtonLink, Card, CardHeader, Field, Select, Stat, Textarea } from "@/components/ui";
 import { useFormat } from "@/components/format";
@@ -22,6 +25,23 @@ interface Loaded {
   text: string;
   parsed: ParsedCsv;
 }
+
+/**
+ * A file the importer can't map itself. Statements, OFX/QIF, screenshots,
+ * CSVs without clear columns and batches go to the assistant; spreadsheets
+ * and unknown types get told what to do instead.
+ */
+interface Handoff {
+  files: File[];
+  reason: "statement" | "messy" | "several" | "spreadsheet" | "unsupported";
+  /** Files of a batch that nothing can read, left out of the handoff. */
+  leftOut?: number;
+}
+
+/** Everything the importer and the assistant can take, so nothing is greyed out in the file dialog. */
+const ACCEPT = `${UPLOAD_ACCEPT},text/csv,text/plain,.xlsx,.xls,.ods,.numbers`;
+
+const extOf = (name: string) => name.toLowerCase().split(".").pop() ?? "";
 
 /** UTF-8 first; fall back to Windows-1252 (common in French bank exports) when it doesn't decode cleanly. */
 function decode(buf: ArrayBuffer): string {
@@ -68,12 +88,15 @@ export function ImportWizard({
   accounts,
   defaultAccountId,
   baseCurrency,
+  assistantReady,
 }: {
   accounts: { id: number; name: string; currency: string }[];
   defaultAccountId: number | null;
   baseCurrency: string;
+  assistantReady: boolean;
 }) {
   const f = useFormat();
+  const router = useRouter();
   const [step, setStep] = useState<Step>("file");
   const [file, setFile] = useState<Loaded | null>(null);
   const [mapping, setMapping] = useState<CsvMapping | null>(null);
@@ -87,28 +110,69 @@ export function ImportWizard({
   const [paste, setPaste] = useState("");
   const [dragging, setDragging] = useState(false);
   const [result, setResult] = useState<Extract<ImportResult, { ok: true }> | null>(null);
+  const [handoff, setHandoff] = useState<Handoff | null>(null);
+  /** Upload progress (0–1) while handing files to the assistant. */
+  const [sending, setSending] = useState<number | null>(null);
   const [pending, start] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const load = (text: string, name: string) => {
+  const load = (text: string, name: string, original?: File) => {
     setError(null);
     if (new Blob([text]).size > MAX_BYTES) return setError("That’s more than 5 MB — export a shorter period.");
     const parsed = parseCsv(text);
     if (parsed.headers.length < 2 || parsed.rows.length === 0) {
-      return setError("Couldn’t find columns in this file. Is it a CSV export (not PDF or Excel)?");
+      const file = original ?? new File([text], "pasted-transactions.txt", { type: "text/plain" });
+      return setHandoff({ files: [file], reason: "messy" });
     }
     setFile({ name, text, parsed });
     setMapping(guessMapping(parsed.headers));
     setStep("map");
   };
 
-  const readFile = async (picked: File | undefined) => {
-    if (!picked) return;
+  const readFiles = async (list: File[]) => {
+    if (!list.length) return;
+    setError(null);
+    if (list.length > 1) {
+      const readable = list.filter((x) => uploadKind(x.type, x.name));
+      if (readable.length > 1) {
+        return setHandoff({ files: readable, reason: "several", leftOut: list.length - readable.length });
+      }
+      list = readable.length ? readable : [list[0]];
+    }
+    const picked = list[0];
+    const route = importRoute(picked.type, picked.name);
+    if (route !== "importer") {
+      return setHandoff({ files: [picked], reason: route === "assistant" ? "statement" : route });
+    }
     if (picked.size > MAX_BYTES) return setError("That file is more than 5 MB — export a shorter period.");
     try {
-      load(decode(await picked.arrayBuffer()), picked.name);
+      load(decode(await picked.arrayBuffer()), picked.name, picked);
     } catch {
       setError("Couldn’t read that file.");
+    }
+  };
+
+  const sendToAssistant = async () => {
+    if (!handoff) return;
+    setError(null);
+    const progress = handoff.files.map(() => 0);
+    setSending(0);
+    try {
+      const uploaded = await Promise.all(
+        handoff.files.map((file, i) =>
+          uploadFile(file, {
+            onProgress: (p) => {
+              progress[i] = p;
+              setSending(progress.reduce((a, b) => a + b, 0) / progress.length);
+            },
+          }),
+        ),
+      );
+      setSending(1);
+      router.push(`/assistant?attach=${uploaded.map((u) => encodeURIComponent(u.id)).join(",")}`);
+    } catch (e) {
+      setSending(null);
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -148,6 +212,8 @@ export function ImportWizard({
     setResult(null);
     setPaste("");
     setError(null);
+    setHandoff(null);
+    setSending(null);
     setStep("file");
   };
 
@@ -156,6 +222,20 @@ export function ImportWizard({
       <AlertTriangle size={15} className="mt-0.5 shrink-0" /> {error}
     </p>
   );
+
+  // ── Not a CSV the importer can map: hand it over, or say what to do ──
+  if (step === "file" && handoff) {
+    return (
+      <HandoffCard
+        handoff={handoff}
+        assistantReady={assistantReady}
+        sending={sending}
+        error={errorBox}
+        onSend={sendToAssistant}
+        onBack={reset}
+      />
+    );
+  }
 
   // ── Step 1: file ──
   if (step === "file") {
@@ -172,7 +252,7 @@ export function ImportWizard({
             onDrop={(e) => {
               e.preventDefault();
               setDragging(false);
-              readFile(e.dataTransfer.files[0]);
+              readFiles(Array.from(e.dataTransfer.files));
             }}
             className={clsx(
               "flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-12 text-center transition",
@@ -180,7 +260,7 @@ export function ImportWizard({
             )}
           >
             <Upload size={28} className="text-muted" aria-hidden />
-            <p className="mt-3 font-medium">Drop your bank’s CSV file here</p>
+            <p className="mt-3 font-medium">Drop your bank export here</p>
             <p className="mt-1 mb-4 text-sm text-ink-2">or</p>
             <Button variant="primary" onClick={() => inputRef.current?.click()} autoFocus>
               <FileText size={15} /> Choose a file
@@ -188,15 +268,20 @@ export function ImportWizard({
             <input
               ref={inputRef}
               type="file"
-              accept=".csv,.txt,text/csv,text/plain"
+              accept={ACCEPT}
+              multiple
               className="sr-only"
               tabIndex={-1}
               onChange={(e) => {
-                readFile(e.target.files?.[0]);
+                readFiles(Array.from(e.target.files ?? []));
                 e.target.value = "";
               }}
             />
-            <p className="mt-4 text-xs text-muted">Up to 5 MB · “;” or “,” separated · French decimals (12,50) are fine</p>
+            <p className="mt-4 text-xs text-muted">CSV up to 5 MB · “;” or “,” separated · French decimals (12,50) are fine</p>
+            <p className="mt-1.5 text-xs text-ink-2">
+              <Sparkles size={12} className="mr-1 inline align-[-1px] text-accent" aria-hidden />
+              PDF statements, OFX/QIF and screenshots work too, through the assistant
+            </p>
           </div>
           <Disclosure summary={<span className="text-sm text-ink-2">Or paste the CSV text</span>} summaryClassName="py-1">
             <div className="space-y-2 pt-3 text-sm">
@@ -467,5 +552,121 @@ export function ImportWizard({
       </div>
       {errorBox}
     </div>
+  );
+}
+
+const KIND_NOUN = { pdf: "PDF statement", image: "screenshot" } as const;
+
+function HandoffCard({
+  handoff,
+  assistantReady,
+  sending,
+  error,
+  onSend,
+  onBack,
+}: {
+  handoff: Handoff;
+  assistantReady: boolean;
+  sending: number | null;
+  error: ReactNode;
+  onSend: () => void;
+  onBack: () => void;
+}) {
+  const { files, reason } = handoff;
+  const first = files[0];
+  const toAssistant = reason === "statement" || reason === "messy" || reason === "several";
+  const kind = uploadKind(first.type, first.name);
+  const noun =
+    kind === "pdf" || kind === "image" ? KIND_NOUN[kind] : `${extOf(first.name).toUpperCase()} export`;
+
+  const [title, body] = {
+    statement: [
+      `Send this ${noun} to the assistant`,
+      `This page reads CSV files. The assistant reads ${noun}s: it pulls out the transactions, matches them to an account and imports them.`,
+    ],
+    messy: [
+      "Couldn’t find the columns",
+      "This file doesn’t look like a regular CSV: no header row, or an unusual layout. The assistant can usually work it out and import the transactions.",
+    ],
+    several: [
+      `Import ${files.length} files with the assistant`,
+      "This page takes one CSV at a time. The assistant imports them all in one go, each into the right account.",
+    ],
+    spreadsheet: [
+      "Save it as CSV first",
+      "Spreadsheet files can’t be read yet. Open it in Excel, Numbers or Sheets, export it as CSV (File → Save As, or Export), then drop the .csv here.",
+    ],
+    unsupported: [
+      `Wallet can’t read .${extOf(first.name)} files`,
+      "Drop a CSV export, a PDF statement, an OFX/QIF file or a screenshot instead.",
+    ],
+  }[reason];
+
+  return (
+    <Card className="space-y-5">
+      <div className="flex items-start gap-3.5">
+        <span
+          className={clsx(
+            "grid h-10 w-10 shrink-0 place-items-center rounded-xl",
+            toAssistant ? "bg-brand-gradient text-white shadow-card" : "bg-surface-2 text-muted",
+          )}
+          aria-hidden
+        >
+          {toAssistant ? <Sparkles size={18} /> : <KindIcon kind={reason === "spreadsheet" ? "csv" : null} size={18} />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="font-semibold text-ink">{title}</h2>
+          <p className="mt-1 text-sm text-ink-2">{body}</p>
+        </div>
+      </div>
+
+      <ul className="space-y-1.5">
+        {files.map((file, i) => (
+          <li key={i} className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-sm">
+            <KindIcon kind={uploadKind(file.type, file.name)} size={14} className="shrink-0 text-accent" />
+            <span className="min-w-0 flex-1 truncate text-ink" title={file.name}>
+              {file.name}
+            </span>
+            <span className="shrink-0 text-xs text-muted tabular">{formatBytes(file.size)}</span>
+          </li>
+        ))}
+        {!!handoff.leftOut && (
+          <li className="px-1 text-xs text-muted">
+            {handoff.leftOut === 1 ? "1 other file isn’t" : `${handoff.leftOut} other files aren’t`} a type Wallet can read,
+            so {handoff.leftOut === 1 ? "it’s" : "they’re"} left out.
+          </li>
+        )}
+      </ul>
+
+      {toAssistant && !assistantReady && (
+        <p className="text-sm text-ink-2">The assistant isn’t set up yet: give it an AI provider in Settings first.</p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        {toAssistant && assistantReady && (
+          <Button variant="primary" onClick={onSend} disabled={sending !== null} autoFocus>
+            {sending === null ? (
+              <>
+                Import with the assistant <ArrowRight size={15} />
+              </>
+            ) : (
+              <>
+                <Loader2 size={15} className="animate-spin" />
+                {sending < 1 ? `Uploading… ${Math.round(sending * 100)}%` : "Opening the assistant…"}
+              </>
+            )}
+          </Button>
+        )}
+        {toAssistant && !assistantReady && (
+          <ButtonLink href="/settings#integrations" variant="primary">
+            Set up the assistant <ArrowRight size={15} />
+          </ButtonLink>
+        )}
+        <Button variant={toAssistant ? "ghost" : "primary"} onClick={onBack} disabled={sending !== null} autoFocus={!toAssistant}>
+          <ArrowLeft size={15} /> Choose another file
+        </Button>
+      </div>
+      {error}
+    </Card>
   );
 }

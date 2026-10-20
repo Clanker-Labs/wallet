@@ -6,6 +6,7 @@ import * as budgetSvc from "@/server/services/budgets";
 import * as reminderSvc from "@/server/services/reminders";
 import * as holdingsSvc from "@/server/services/holdings";
 import * as uploadsSvc from "@/server/services/uploads";
+import * as connectionsSvc from "@/server/services/connections";
 import { ensureFreshRates, fxConverter, latestFxDate } from "@/server/services/fx";
 import { refreshPrices, searchSymbols } from "@/server/services/prices";
 import { netWorthHistory, netWorthOn } from "@/server/services/networth";
@@ -47,7 +48,7 @@ const month = z.string().refine(isMonth, "Expected YYYY-MM");
 const SQL_SCHEMA = `Tables (only your data; amounts are INTEGER cents in the row's currency; dates are TEXT 'YYYY-MM-DD'):
 - accounts(id, name, institution, type, asset_class ['cash','investments','retirement','real_estate','crypto','commodities','other','liabilities'], currency, ownership_pct, include_in_net_worth, archived_at, linked_account_id, loan_params JSON, notes)
 - balance_snapshots(id, account_id, date, balance_cents, note, source) — one row per account per day, in the account currency; liabilities store the amount owed as a positive number
-- holdings(id, account_id, symbol, name, asset_type, quantity REAL, currency, cost_basis REAL per unit, manual_price REAL)
+- holdings(id, account_id, symbol, name, asset_type, quantity REAL, currency, cost_basis REAL per unit, manual_price REAL, connection_id, external_id) — connection_id set = synced from a brokerage, overwritten by the next sync
 - prices(symbol, date, close REAL, currency) — daily closes of held symbols
 - fx_rates(currency, date, per_usd REAL) — units of currency per 1 USD
 - transactions(id, account_id, date, amount_cents [negative = spending], currency, description, category_id, notes, source)
@@ -188,6 +189,15 @@ export const TOOLS = [
     readOnly: true,
     run: ({ accountId }, { userId }) =>
       accountId ? holdingsSvc.listHoldings(userId, { accountId }) : holdingsSvc.holdingsSummary(userId),
+  }),
+  tool({
+    name: "list_connections",
+    title: "List brokerage connections",
+    description:
+      "Brokerage accounts synced automatically (e.g. Trading 212): which wallet account each one fills, how many positions it holds, when it last synced and the last error. Synced holdings are overwritten on every sync (hourly), so change positions at the broker, not with upsert_holding. Connections are added in Settings → Brokerage connections; credentials are never exposed.",
+    input: z.object({}),
+    readOnly: true,
+    run: (_i, { userId }) => connectionsSvc.listConnections(userId),
   }),
   tool({
     name: "search_symbol",
@@ -490,6 +500,21 @@ export const TOOLS = [
       accountsSvc.snapshotHoldingAccounts(userId);
       invalidateSqlSandbox(userId);
       return r;
+    },
+  }),
+  tool({
+    name: "sync_connection",
+    title: "Sync a brokerage connection",
+    description:
+      "Pull positions, average prices and cash from a connected brokerage now (normally hourly). Omit connectionId to sync every connection. Read-only at the broker: nothing is ever bought or sold. A failure (bad key, rate limit) comes back as ok: false with the error.",
+    input: z.object({ connectionId: z.number().int().optional() }),
+    readOnly: false,
+    run: async ({ connectionId }, { userId }) => {
+      const ids = connectionId ? [connectionId] : connectionsSvc.listConnections(userId).map((c) => c.id);
+      const results = [];
+      for (const id of ids) results.push(await connectionsSvc.syncConnection(userId, id, { force: true }));
+      invalidateSqlSandbox(userId);
+      return { results };
     },
   }),
   tool({

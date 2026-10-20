@@ -25,6 +25,10 @@ import { PasskeyList, type PasskeyItem } from "@/components/settings-security";
 import { RefreshRatesButton } from "@/components/settings-currency";
 import { TelegramLink } from "@/components/settings-telegram";
 import { AddPasskey, SignOutButton } from "@/components/passkey-auth";
+import { BrokerConnections, type ConnectionItem, type ConnectorOption } from "@/components/settings-connections";
+import { CONNECTORS } from "@/server/connectors";
+import { listConnections } from "@/server/services/connections";
+import { listAccounts } from "@/server/services/accounts";
 import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
@@ -49,6 +53,7 @@ export default async function SettingsPage() {
     ["telegram", "Telegram"],
     ["categories", "Categories"],
     ["rules", "Rules"],
+    ["connections", "Brokerages"],
     ["integrations", "Integrations"],
     ...(isOwner ? ([["members", "Members"]] as [string, string][]) : []),
     ["data", "Data"],
@@ -124,6 +129,33 @@ export default async function SettingsPage() {
     : [];
   const signupsOpen = signupAllowed(countUsers());
   const owner = isOwner ? user : listUsers().find((u) => u.role === "owner");
+
+  // ── Brokerage connections (no credential ever reaches the page) ──
+  const connections: ConnectionItem[] = listConnections(uid).map((c) => ({
+    id: c.id,
+    provider: c.provider,
+    providerName: c.providerName,
+    environmentLabel: c.environmentLabel,
+    accountId: c.accountId,
+    accountName: c.accountName,
+    holdingsCount: c.holdingsCount,
+    lastSync: c.lastSyncAt ? relative(c.lastSyncAt) : null,
+    lastSyncOk: c.lastSyncOk,
+    lastError: c.lastError,
+  }));
+  const linkedAccounts = new Set(connections.map((c) => c.accountId));
+  const syncTargets = listAccounts(uid)
+    .filter((a) => a.assetClass === "investments" && !linkedAccounts.has(a.id) && !a.loanParams)
+    .map((a) => ({ id: a.id, name: a.name }));
+  const connectorOptions: ConnectorOption[] = CONNECTORS.map((c) => ({
+    id: c.id,
+    name: c.name,
+    description: c.description,
+    setupHint: c.setupHint,
+    docsUrl: c.docsUrl,
+    environments: c.environments,
+    credentialFields: c.credentialFields,
+  }));
 
   // ── Integrations ──
   const agent = agentStatus();
@@ -355,6 +387,25 @@ export default async function SettingsPage() {
       <Card id="rules" className="scroll-mt-20">
         <CardHeader title="Categorization rules" subtitle="Longest matching text wins · applied on CSV import and on demand" />
         <RulesEditor rules={rules} categories={categories} uncategorized={uncategorized} />
+      </Card>
+
+      <Card id="connections" className="scroll-mt-20">
+        <CardHeader
+          title="Brokerage connections"
+          subtitle="Positions and cash synced hourly, read-only: wallet never places an order"
+          action={
+            connections.length > 0 ? (
+              <span className="shrink-0 whitespace-nowrap">
+                <Badge tone={connections.some((c) => c.lastSyncOk === false) ? "critical" : "good"}>{connections.length} connected</Badge>
+              </span>
+            ) : undefined
+          }
+        />
+        <p className="mb-4 text-sm text-ink-2">
+          {connectorOptions.map((c) => c.name).join(", ")}. Synced positions replace themselves on every sync — edit them at the
+          broker, not here. Holdings you add by hand to the same account are kept.
+        </p>
+        <BrokerConnections connectors={connectorOptions} connections={connections} accounts={syncTargets} />
       </Card>
 
       <Card id="integrations" className="scroll-mt-20">

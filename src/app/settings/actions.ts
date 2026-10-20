@@ -15,6 +15,14 @@ import {
   updateCategory,
   upsertRule,
 } from "@/server/services/categories";
+import {
+  createConnection,
+  deleteConnection,
+  syncConnection,
+  updateConnectionCredentials,
+  type SyncResult,
+} from "@/server/services/connections";
+import { invalidateSqlSandbox } from "@/server/agent/sql-sandbox";
 import { requireUid } from "@/server/session";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string; errors?: Record<string, string> };
@@ -173,4 +181,67 @@ export async function unlinkTelegramAction(): Promise<ActionResult> {
   linkTelegramChat(uid, null);
   refreshSettings();
   return { ok: true, message: "Telegram unlinked" };
+}
+
+// ── Brokerage connections ────────────────────────────────────────────────
+
+function syncMessage(r: SyncResult): string {
+  if (r.skipped) return "Synced a moment ago — already up to date";
+  const parts = [`${r.positions} position${r.positions === 1 ? "" : "s"}`];
+  if (r.added) parts.push(`${r.added} new`);
+  if (r.removed) parts.push(`${r.removed} removed`);
+  return `Synced: ${parts.join(", ")}${r.warnings.length ? ` · ${r.warnings.length} skipped` : ""}`;
+}
+
+export async function connectBrokerAction(input: {
+  provider: string;
+  environment: string;
+  credentials: Record<string, string>;
+  accountId: number | null;
+}): Promise<ActionResult> {
+  const uid = await requireUid();
+  try {
+    const { connection, sync } = await createConnection(uid, input);
+    invalidateSqlSandbox(uid);
+    refreshAll();
+    return { ok: true, message: `Connected ${connection.providerName} to “${connection.accountName}”. ${syncMessage(sync)}` };
+  } catch (e) {
+    return { ok: false, error: errorText(e) };
+  }
+}
+
+export async function syncBrokerAction(id: number): Promise<ActionResult> {
+  const uid = await requireUid();
+  try {
+    const r = await syncConnection(uid, id);
+    invalidateSqlSandbox(uid);
+    refreshAll();
+    return r.ok ? { ok: true, message: syncMessage(r) } : { ok: false, error: r.error ?? "Sync failed" };
+  } catch (e) {
+    return { ok: false, error: errorText(e) };
+  }
+}
+
+export async function updateBrokerCredentialsAction(id: number, credentials: Record<string, string>): Promise<ActionResult> {
+  const uid = await requireUid();
+  try {
+    const r = await updateConnectionCredentials(uid, id, credentials);
+    invalidateSqlSandbox(uid);
+    refreshAll();
+    return { ok: true, message: `New key saved. ${syncMessage(r)}` };
+  } catch (e) {
+    return { ok: false, error: errorText(e) };
+  }
+}
+
+export async function disconnectBrokerAction(id: number): Promise<ActionResult> {
+  const uid = await requireUid();
+  try {
+    deleteConnection(uid, id);
+    invalidateSqlSandbox(uid);
+    refreshAll();
+    return { ok: true, message: "Disconnected — the key is deleted, positions stay as manual holdings" };
+  } catch (e) {
+    return { ok: false, error: errorText(e) };
+  }
 }

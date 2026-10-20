@@ -1,11 +1,13 @@
 import { snapshotHoldingAccounts } from "./accounts";
+import { syncStaleConnections } from "./connections";
 import { ensureFreshRates } from "./fx";
 import { refreshPrices } from "./prices";
 import { listUsers } from "./users";
 
 /**
- * Exchange rates, market prices, then today's value of every holdings-based
- * account. Shared by the worker (hourly) and the web app (throttled, after
+ * Exchange rates, market prices, brokerage syncs, then today's value of
+ * every holdings-based account. Brokers go after prices so their own price
+ * for today is the one that sticks. Shared by the worker (hourly) and the web app (throttled, after
  * responses), so an install without the Telegram worker stays current too.
  * Never throws; problems come back as messages.
  */
@@ -18,6 +20,7 @@ export async function refreshMarketData(opts: { fetchImpl?: typeof fetch } = {})
     const prices = await refreshPrices({ fetchImpl: opts.fetchImpl });
     if (prices.updated.length) log.push(`📈 prices updated: ${prices.updated.join(", ")}`);
     if (prices.failed.length) log.push(`⚠️ prices: ${prices.failed.map((f) => f.error).join("; ")}`);
+    log.push(...(await syncStaleConnections({ fetchImpl: opts.fetchImpl })).log);
     for (const u of listUsers()) snapshotHoldingAccounts(u.id);
   } catch (e) {
     log.push(`⚠️ market data: ${e instanceof Error ? e.message : String(e)}`);

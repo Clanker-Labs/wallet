@@ -40,6 +40,26 @@ London quotes in pence (`GBp`) and other minor units are converted to the major 
 
 Gain = market value − quantity × average cost, in the quote currency, with the percentage. The total gain at the top only counts positions that have a cost basis. Removing the last position of an account sets the account to 0 for today instead of freezing its previous value.
 
+## Brokerage sync
+
+**Settings → Brokerage connections** links a broker account so its positions keep themselves up to date. Trading 212 is the first connector (Invest and ISA accounts, live or practice).
+
+1. In the Trading 212 app: **Settings → API (Beta) → Generate API key**. Grant only the read permissions: *Account data*, *Portfolio* and *Metadata*. wallet never calls an order endpoint, so leave *Orders* off and a leaked key still can't trade.
+2. Paste the key and the secret, pick live or practice, and choose an investment account to sync into, or let wallet create one in the broker's currency. Practice accounts are created outside net worth.
+3. The key is checked against Trading 212 before anything is saved, then stored encrypted ([Security](security.html#broker-credentials)).
+
+Every sync **replaces** the account's synced positions with the broker's: new positions appear, sold ones disappear, quantities and average prices follow, and a *Cash* line holds uninvested cash (free + pie cash + cash reserved for pending orders). Holdings you add by hand to the same account are left alone. Synced rows carry a *synced* badge and can't be edited here; change them at the broker.
+
+Tickers are mapped to Yahoo symbols (`AAPL_US_EQ` → `AAPL`, `VUSAl_EQ` → `VUSA.L`, `SAPd_EQ` → `SAP.DE`) so new positions get a year of price history; the broker's own price is stored as today's price, so a position is valued even when Yahoo doesn't know its symbol.
+
+| When | What syncs |
+|---|---|
+| Connecting | Immediately. |
+| Background (web every 30 min, worker hourly) | Connections not synced in the last 50 minutes, after the price refresh. |
+| **Sync now** (or the `sync_connection` tool) | That connection, at most every 30 seconds. |
+
+A failed sync (revoked key, rate limit, outage) keeps the last positions and shows the error on the connection. **New key** swaps the credentials for the same broker account. **Disconnect** deletes the key; the positions stay as ordinary manual holdings.
+
 ## From statements
 
 Drop a broker statement or a screenshot of your broker's app on the [assistant](assistant.html): it looks up each line with `search_symbol` (ISINs work) and adds it with `upsert_holding`.

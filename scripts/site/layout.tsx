@@ -358,7 +358,7 @@ const WHY: { icon: keyof typeof ICONS; title: string; text: ReactNode }[] = [
   {
     icon: "bot",
     title: "AI that does things",
-    text: "34 tools for reading, simulating and writing your data, shared by the chat, Telegram, an MCP server and a REST API.",
+    text: "36 tools for reading, simulating and writing your data, shared by the chat, Telegram, an MCP server and a REST API.",
   },
   {
     icon: "file",

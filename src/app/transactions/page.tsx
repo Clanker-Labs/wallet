@@ -100,7 +100,7 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
           actions={
             <>
               <ButtonLink href="/transactions/import">
-                <Upload size={15} /> Import CSV
+                <Upload size={15} /> Import
               </ButtonLink>
               {uncategorized > 0 && !onlyUncategorized && (
                 <ButtonLink href="/transactions?category=none" variant="primary">
@@ -166,11 +166,11 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
                   title="No transactions yet"
                   action={
                     <ButtonLink href="/transactions/import" variant="primary">
-                      <Upload size={15} /> Import a bank CSV
+                      <Upload size={15} /> Import from your bank
                     </ButtonLink>
                   }
                 >
-                  Export a CSV from your bank and import it — or use Quick add above.
+                  Drop a CSV or PDF statement from your bank — or use Quick add above.
                 </EmptyState>
               )}
             </div>

@@ -8,6 +8,7 @@ import { matchTransfers } from "@/server/services/transfers";
 import { parseAmount } from "@/lib/money";
 import { isISODate } from "@/lib/dates";
 import { requireUid } from "@/server/session";
+import { getSettings } from "@/server/services/settings";
 
 export interface TxActionState {
   ok: boolean;
@@ -58,7 +59,7 @@ export async function quickAddTransaction(fd: FormData): Promise<TxActionState> 
   };
   const description = s("description");
   if (!description) return { ok: false, message: "Add a description." };
-  const raw = parseAmount(s("amount"));
+  const raw = parseAmount(s("amount"), getSettings(uid).locale);
   if (raw === null || raw === 0) return { ok: false, message: "Type an amount, e.g. 12.50" };
   const amount = s("direction") === "in" ? Math.abs(raw) : -Math.abs(raw);
   const date = s("date");

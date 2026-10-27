@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Repeat, Tag, Upload, X } from "lucide-react"
 import { countUncategorized, firstTransactionMonth, listTransactions, transactionTotals } from "@/server/services/transactions";
 import { listCategories, normalizePattern, suggestPattern } from "@/server/services/categories";
 import { listAccounts } from "@/server/services/accounts";
-import { today } from "@/server/services/settings";
+import { getSettings, today } from "@/server/services/settings";
 import { serverFormat } from "@/server/format";
 import { currentMonth, formatDate, isISODate, monthRange } from "@/lib/dates";
 import { Badge, Button, ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
@@ -78,7 +78,7 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
   const defaultAccount = activeAccounts.find((a) => a.type === "checking") ?? null;
   const t = today(uid);
   const first = firstTransactionMonth(uid);
-  const months = first ? monthRange(first, currentMonth()).reverse() : [];
+  const months = first ? monthRange(first, currentMonth(getSettings(uid).timezone)).reverse() : [];
   const f = serverFormat(uid);
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));

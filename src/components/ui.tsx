@@ -156,7 +156,14 @@ export function Meter({ pct, status, pace }: { pct: number; status: "ok" | "ahea
   const fill = status === "over" ? "var(--critical)" : status === "ahead_of_pace" ? "var(--warning)" : "var(--accent)";
   return (
     <div className="relative h-2 w-full overflow-hidden rounded-full" style={{ background: "var(--series-1-track)" }}>
-      <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: fill }} />
+      <div
+        className="animate-grow h-full rounded-full"
+        role="progressbar"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: fill }}
+      />
       {pace !== undefined && pace > 0 && pace < 1 && (
         <div className="absolute top-0 h-full w-px bg-ink opacity-50" style={{ left: `${pace * 100}%` }} title="Today" />
       )}

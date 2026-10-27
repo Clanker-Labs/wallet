@@ -12,9 +12,18 @@ export async function register() {
   if (g.__walletRefreshTimer) return;
   const { refreshMarketDataInBackground } = await import("./server/services/market");
   const { ensureDailyBackup } = await import("./server/services/backup");
+  const { purgeExpiredSessions } = await import("./server/services/users");
+  const { purgeOldUploads } = await import("./server/services/uploads");
   const tick = () => {
     void refreshMarketDataInBackground().catch((e) => console.warn("[market] background refresh failed:", e));
     // A backup a day, kept 14 days plus 8 weekly copies (WALLET_BACKUPS=0 turns it off).
+    // Housekeeping: expired sessions, and uploaded statements older than 90 days.
+    try {
+      purgeExpiredSessions();
+      purgeOldUploads(Number(process.env.WALLET_UPLOAD_DAYS) || 90);
+    } catch (e) {
+      console.warn("[housekeeping]", e);
+    }
     if (!/^(0|false|no|off)$/i.test(process.env.WALLET_BACKUPS ?? "")) {
       try {
         ensureDailyBackup();

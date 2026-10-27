@@ -16,7 +16,7 @@ import {
   updateAccount,
   type AccountInput,
 } from "@/server/services/accounts";
-import { today } from "@/server/services/settings";
+import { getSettings, today } from "@/server/services/settings";
 import { ACCOUNT_TYPES, type AccountType, type LoanParams } from "@/lib/domain";
 import { parseAmount } from "@/lib/money";
 import { isISODate } from "@/lib/dates";
@@ -160,7 +160,7 @@ export async function updateAccountAction(fd: FormData): Promise<AccountActionSt
 export async function quickRecordBalance(fd: FormData): Promise<boolean> {
   const uid = await requireUid();
   const accountId = intId(fd.get("accountId"));
-  const amount = parseAmount(String(fd.get("amount") ?? ""));
+  const amount = parseAmount(String(fd.get("amount") ?? ""), getSettings(uid).locale);
   if (!accountId || amount === null) return false;
   recordBalance(uid, { accountId, balance: amount, source: "manual" });
   refresh();
@@ -172,7 +172,7 @@ export async function recordBalanceAction(fd: FormData): Promise<AccountActionSt
   const uid = await requireUid();
   const accountId = intId(fd.get("accountId"));
   if (!accountId) return { ok: false, message: "Unknown account." };
-  const amount = parseAmount(str(fd, "amount"));
+  const amount = parseAmount(str(fd, "amount"), getSettings(uid).locale);
   if (amount === null) return { ok: false, message: "Type the balance, e.g. 1234.56" };
   const date = str(fd, "date") || today(uid);
   if (!isISODate(date)) return { ok: false, message: "Pick a valid date." };

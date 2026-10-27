@@ -5,7 +5,8 @@ import { importExport } from "@/server/services/export";
 import { audit } from "@/server/services/audit";
 import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
-import { setSetting, type AppSettings } from "@/server/services/settings";
+import { getSettings, setSetting, type AppSettings } from "@/server/services/settings";
+import { rescheduleReminders } from "@/server/services/reminders";
 import { deletePasskey, listPasskeys, renamePasskey } from "@/server/services/passkeys";
 import { ensureFreshRates, latestFxDate } from "@/server/services/fx";
 import { createTelegramLinkCode } from "@/server/services/telegram-link";
@@ -50,6 +51,7 @@ export async function savePreferences(input: AppSettings): Promise<ActionResult>
     timezone: String(input.timezone ?? "").trim(),
   };
   const errors: Record<string, string> = {};
+  const timezoneBefore = getSettings(uid).timezone;
   for (const key of ["currency", "locale", "timezone"] as const) {
     if (!values[key]) errors[key] = "Required";
     else {
@@ -60,6 +62,8 @@ export async function savePreferences(input: AppSettings): Promise<ActionResult>
       }
     }
   }
+  // Reminders are "9:00 where you are": a new time zone moves them.
+  if (!errors.timezone && values.timezone !== timezoneBefore) rescheduleReminders(uid);
   refreshAll();
   if (Object.keys(errors).length) return { ok: false, error: "Some values weren't saved", errors };
   return { ok: true, message: "Preferences saved" };

@@ -9,6 +9,7 @@ import { formatMonth } from "@/lib/dates";
 import { Badge, ButtonLink, Card, CardHeader, Delta, EmptyState, Meter, SeriesDot, Stat } from "@/components/ui";
 import { AllocationDonut, CashflowChart } from "@/components/charts";
 import { MoversCard, NetWorthPanel } from "@/components/networth-ui";
+import { CountUp } from "@/components/count-up";
 import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
@@ -71,7 +72,9 @@ export default async function Dashboard() {
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div>
             <div className="text-sm text-muted">Net worth · {nw.currency}</div>
-            <div className="mt-1 text-5xl font-semibold tracking-tight">{f.money(nw.netCents, { whole: true })}</div>
+            <div className="tabular mt-1 text-5xl font-semibold tracking-tight">
+              <CountUp cents={nw.netCents} opts={{ whole: true }} />
+            </div>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
               {moves.map((c) => (
                 <span key={c.label} className="inline-flex items-center gap-1.5">

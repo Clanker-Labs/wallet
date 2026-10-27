@@ -48,7 +48,22 @@ export function formatPct(value: number, digits = 1): string {
  * Parse a human / bank-export amount: "1 234,56", "1,234.56", "-12.5", "€ 42",
  * "(15.00)" (accounting negative), "12,5k". Returns null when unparseable.
  */
-export function parseAmount(input: string | number | null | undefined): number | null {
+/** The decimal separator a locale writes ("," for fr-FR, "." for en-US). */
+export function decimalSeparator(locale: string): "," | "." {
+  try {
+    return new Intl.NumberFormat(locale).formatToParts(1.5).find((p) => p.type === "decimal")?.value === "," ? "," : ".";
+  } catch {
+    return ".";
+  }
+}
+
+/**
+ * Parse a typed amount. `locale` settles the one ambiguous case — a single
+ * separator followed by exactly three digits: "1.500" is 1500 in French and
+ * 1.5 in English, "1,500" the other way round. Without it, three digits after
+ * a single separator read as thousands.
+ */
+export function parseAmount(input: string | number | null | undefined, locale?: string): number | null {
   if (input === null || input === undefined) return null;
   if (typeof input === "number") return Number.isFinite(input) ? input : null;
   let s = input.trim();
@@ -93,11 +108,14 @@ export function parseAmount(input: string | number | null | undefined): number |
   } else if (lastComma >= 0) {
     const decimals = s.length - lastComma - 1;
     const commaCount = (s.match(/,/g) ?? []).length;
-    normalized =
-      commaCount === 1 && decimals > 0 && decimals <= 2 ? s.replace(",", ".") : s.replace(/,/g, "");
+    const decimalComma = commaCount === 1 && decimals > 0 && (decimals <= 2 || (decimals === 3 && locale !== undefined && decimalSeparator(locale) === ","));
+    normalized = decimalComma ? s.replace(",", ".") : s.replace(/,/g, "");
   } else if (lastDot >= 0) {
     const dotCount = (s.match(/\./g) ?? []).length;
-    normalized = dotCount > 1 ? s.replace(/\./g, "") : s;
+    const decimals = s.length - lastDot - 1;
+    // "1.500" with a comma-decimal locale is fifteen hundred.
+    const thousandsDot = dotCount > 1 || (dotCount === 1 && decimals === 3 && locale !== undefined && decimalSeparator(locale) === ",");
+    normalized = thousandsDot ? s.replace(/\./g, "") : s;
   } else {
     normalized = s;
   }

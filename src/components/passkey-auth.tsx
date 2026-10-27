@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Fingerprint, Loader2, QrCode, Smartphone } from "lucide-react";
 import { browserSupportsWebAuthn, startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Button, Input } from "./ui";
+import { clearOfflineCopies } from "./pwa";
 
 type Mode = "device" | "phone";
 
@@ -188,6 +189,7 @@ export function SignOutButton({ className }: { className?: string }) {
     <button
       className={className}
       onClick={async () => {
+        clearOfflineCopies(); // no finance pages left on a device you signed out of
         await fetch("/api/auth/logout", { method: "POST" });
         router.replace("/login");
         router.refresh();

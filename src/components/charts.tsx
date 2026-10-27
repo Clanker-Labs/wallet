@@ -27,6 +27,13 @@ import { useFormat } from "./format";
  * Colors come from CSS variables so dark mode uses its own validated steps.
  */
 
+/** Charts draw in once (650 ms), unless the system asks for reduced motion. */
+const motion = () => ({
+  isAnimationActive: typeof window !== "undefined" && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
+  animationDuration: 650,
+  animationEasing: "ease-out" as const,
+});
+
 const AXIS = { stroke: "var(--axis)", tick: { fill: "var(--muted)", fontSize: 11 }, tickLine: false } as const;
 
 interface TooltipRow {
@@ -131,7 +138,7 @@ export function NetWorthChart({
           fill="var(--series-1)"
           fillOpacity={0.1}
           activeDot={{ r: 4, stroke: "var(--surface)", strokeWidth: 2 }}
-          isAnimationActive={false}
+          {...motion()}
         />
       </AreaChart>
     </ResponsiveContainer>
@@ -165,7 +172,7 @@ export function AllocationDonut({ slices, size = 180 }: { slices: Slice[]; size?
             paddingAngle={data.length > 1 ? 1.5 : 0}
             stroke="var(--surface)"
             strokeWidth={data.length > 1 ? 2 : 0}
-            isAnimationActive={false}
+            {...motion()}
           >
             {data.map((s) => (
               <Cell key={s.key} fill={`var(--series-${s.slot})`} />
@@ -241,8 +248,8 @@ export function CashflowChart({
               ) : null
             }
           />
-          <Bar dataKey="income" fill="var(--series-1)" radius={[4, 4, 0, 0]} maxBarSize={20} isAnimationActive={false} />
-          <Bar dataKey="expenses" fill="var(--series-2)" radius={[4, 4, 0, 0]} maxBarSize={20} isAnimationActive={false} />
+          <Bar dataKey="income" fill="var(--series-1)" radius={[4, 4, 0, 0]} maxBarSize={20} {...motion()} />
+          <Bar dataKey="expenses" fill="var(--series-2)" radius={[4, 4, 0, 0]} maxBarSize={20} {...motion()} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -311,7 +318,7 @@ export function YearLines({
               strokeWidth={2}
               dot={false}
               activeDot={{ r: 4, stroke: "var(--surface)", strokeWidth: 2 }}
-              isAnimationActive={false}
+              {...motion()}
             />
           ))}
         </LineChart>
@@ -372,9 +379,9 @@ export function ProjectionChart({
               return <TooltipBox title={`In ${label} years`} rows={rows} />;
             }}
           />
-          {hasBand && <Area dataKey="band" stroke="none" fill="var(--series-1)" fillOpacity={0.12} isAnimationActive={false} />}
-          <Line type="monotone" dataKey="nominal" stroke="var(--series-1)" strokeWidth={2} dot={false} isAnimationActive={false} />
-          <Line type="monotone" dataKey="real" stroke="var(--series-3)" strokeWidth={2} dot={false} isAnimationActive={false} />
+          {hasBand && <Area dataKey="band" stroke="none" fill="var(--series-1)" fillOpacity={0.12} {...motion()} />}
+          <Line type="monotone" dataKey="nominal" stroke="var(--series-1)" strokeWidth={2} dot={false} {...motion()} />
+          <Line type="monotone" dataKey="real" stroke="var(--series-3)" strokeWidth={2} dot={false} {...motion()} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>
@@ -427,7 +434,7 @@ export function StackedYears({
               strokeWidth={1}
               maxBarSize={24}
               radius={idx === series.length - 1 ? [4, 4, 0, 0] : undefined}
-              isAnimationActive={false}
+              {...motion()}
             />
           ))}
         </BarChart>
@@ -491,7 +498,7 @@ export function DailyChangeChart({ points, height = 260 }: { points: { date: str
             ) : null
           }
         />
-        <Bar dataKey="delta" maxBarSize={14} radius={[2, 2, 2, 2]} isAnimationActive={false}>
+        <Bar dataKey="delta" maxBarSize={14} radius={[2, 2, 2, 2]} {...motion()}>
           {data.map((d) => (
             <Cell key={d.date} fill={d.delta >= 0 ? "var(--good)" : "var(--critical)"} />
           ))}
@@ -542,9 +549,9 @@ export function AccrualChart({
               return <TooltipBox title={DateTime.fromISO(p.date).toFormat("d LLL yyyy")} rows={rows} />;
             }}
           />
-          <Area type="linear" dataKey="accrued" stroke="var(--series-3)" strokeWidth={2} fill="var(--series-3)" fillOpacity={0.1} dot={false} isAnimationActive={false} />
+          <Area type="linear" dataKey="accrued" stroke="var(--series-3)" strokeWidth={2} fill="var(--series-3)" fillOpacity={0.1} dot={false} {...motion()} />
           {hasProjection && (
-            <Line type="linear" dataKey="projected" stroke="var(--series-3)" strokeOpacity={0.55} strokeWidth={2} strokeDasharray="5 4" dot={false} isAnimationActive={false} />
+            <Line type="linear" dataKey="projected" stroke="var(--series-3)" strokeOpacity={0.55} strokeWidth={2} strokeDasharray="5 4" dot={false} {...motion()} />
           )}
         </ComposedChart>
       </ResponsiveContainer>
@@ -576,7 +583,7 @@ export function IndexChart({ points, height = 240 }: { points: { date: string; v
             ) : null
           }
         />
-        <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fill={color} fillOpacity={0.08} dot={false} isAnimationActive={false} />
+        <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fill={color} fillOpacity={0.08} dot={false} {...motion()} />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -600,7 +607,7 @@ export function DrawdownChart({ points, height = 140 }: { points: { date: string
             ) : null
           }
         />
-        <Area type="monotone" dataKey="pct" stroke="var(--critical)" strokeWidth={1.5} fill="var(--critical)" fillOpacity={0.15} dot={false} isAnimationActive={false} />
+        <Area type="monotone" dataKey="pct" stroke="var(--critical)" strokeWidth={1.5} fill="var(--critical)" fillOpacity={0.15} dot={false} {...motion()} />
       </AreaChart>
     </ResponsiveContainer>
   );

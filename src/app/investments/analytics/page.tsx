@@ -7,6 +7,7 @@ import type { HoldingType } from "@/lib/domain";
 import { Card, CardHeader, EmptyState, PageHeader, SeriesDot, Stat } from "@/components/ui";
 import { AllocationDonut, DrawdownChart, IndexChart, MonthlyReturns, NetWorthChart, Sparkline } from "@/components/charts";
 import { requireUser } from "@/server/session";
+import { CountUp } from "@/components/count-up";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Investment analytics" };
@@ -66,7 +67,9 @@ export default async function InvestmentAnalyticsPage() {
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <div className="text-sm text-muted">Portfolio · {a.base}</div>
-                <div className="tabular text-4xl font-semibold tracking-tight">{f.money(a.totalCents, { whole: true })}</div>
+                <div className="tabular text-4xl font-semibold tracking-tight">
+                  <CountUp cents={a.totalCents} opts={{ whole: true }} />
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {a.periods.map((p) => (

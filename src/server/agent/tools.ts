@@ -13,6 +13,7 @@ import { netWorthDaily, netWorthHistory, netWorthMoves, netWorthOn } from "@/ser
 import * as jobsSvc from "@/server/services/jobs";
 import { matchTransfers } from "@/server/services/transfers";
 import * as recurringSvc from "@/server/services/recurring";
+import * as companiesSvc from "@/server/services/companies";
 import { getOverview } from "@/server/services/overview";
 import { getSettings, today } from "@/server/services/settings";
 import { purchaseInputSchema, simulatePurchase, capacityInputSchema, borrowingCapacity } from "@/lib/finance/mortgage";
@@ -543,10 +544,59 @@ export const TOOLS = [
     name: "create_account",
     title: "Create account",
     description:
-      "Create an account (bank, savings, brokerage, crypto wallet, property, loan…) in any currency. For an amortizing loan pass loanParams so its balance is computed automatically. For investment accounts, add positions with upsert_holding instead of a balance.",
+      "Create an account (bank, savings, brokerage, crypto wallet, property, loan…) in any currency. For an amortizing loan pass loanParams so its balance is computed automatically. For investment accounts, add positions with upsert_holding instead of a balance. Set country (FR for a French flat) so tax reports know where its income comes from, and companyId when the account belongs to one of the user's companies. Jobs and companies have their own tools (save_job, save_company).",
     input: accountsSvc.accountInputSchema,
     readOnly: false,
     run: (i, { userId }) => accountsSvc.createAccount(userId, i),
+  }),
+  tool({
+    name: "list_companies",
+    title: "Companies you own",
+    description:
+      "The user's companies as net-worth assets: country and legal form, valuation method (book = its own accounts' net value; revenue_multiple / profit_multiple = trailing-12-month figure × multiple; manual), value of 100% and the user's share (company currency and base currency), its own accounts (bank, brokerage, loans — counted through the company, never twice), revenue, expenses and profit per month and over the last 12 months, and the margin.",
+    input: z.object({ months: z.number().int().min(1).max(120).default(24).describe("Months of P&L to return") }),
+    readOnly: true,
+    run: ({ months }, { userId }) =>
+      companiesSvc.listCompanies(userId).map((c) => ({
+        id: c.account.id,
+        name: c.account.name,
+        currency: c.account.currency,
+        ownershipPct: c.account.ownershipPct,
+        params: c.params,
+        valueCents: c.valueCents,
+        ownedCents: c.ownedCents,
+        baseOwnedCents: c.baseOwnedCents,
+        accounts: c.accounts.map((a) => ({ id: a.id, name: a.name, type: a.type, currency: a.currency, balanceCents: a.balanceCents })),
+        ttm: c.ttm,
+        marginPct: c.marginPct,
+        months: c.months.slice(-months),
+      })),
+  }),
+  tool({
+    name: "save_company",
+    title: "Add or update a company",
+    description:
+      "Add a company the user owns (omit accountId) or update one. params.country is where it is taxed (AE, FR…), params.valuation picks how it is valued: 'book' (its own accounts' net value — then attach its bank/brokerage/loan accounts with companyId on create_account/update_account), 'revenue_multiple' or 'profit_multiple' (with params.multiple), or 'manual' (with initialValue for 100%). ownershipPct is the user's share.",
+    input: companiesSvc.companyInputSchema,
+    readOnly: false,
+    run: (i, { userId }) => {
+      const c = companiesSvc.saveCompany(userId, i);
+      invalidateSqlSandbox(userId);
+      return { id: c.account.id, name: c.account.name, valueCents: c.valueCents, ownedCents: c.ownedCents, params: c.params };
+    },
+  }),
+  tool({
+    name: "set_company_financials",
+    title: "Enter a company's month",
+    description:
+      "Record a company's revenue and expenses for one month (YYYY-MM, company currency, both positive), e.g. from the accountant, when its bank isn't imported. Added to what its accounts' transactions show. Zeros clear the month.",
+    input: z.object({ companyId: z.number().int(), month, revenue: z.number().min(0), expenses: z.number().min(0), note: z.string().max(300).optional() }),
+    readOnly: false,
+    run: ({ companyId, month, revenue, expenses, note }, { userId }) => {
+      const r = companiesSvc.setCompanyFinancials(userId, companyId, month, revenue, expenses, note);
+      invalidateSqlSandbox(userId);
+      return r ?? { cleared: month };
+    },
   }),
   tool({
     name: "list_recurring",

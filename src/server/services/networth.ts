@@ -44,7 +44,8 @@ function pointFrom(list: AccountWithBalance[], date: string): NetWorthPoint {
   let assets = 0;
   let liabilities = 0;
   for (const a of list) {
-    if (!a.includeInNetWorth) continue;
+    // A company's own accounts count through the company's value.
+    if (!a.includeInNetWorth || a.companyId) continue;
     byClassCents[a.assetClass] += a.baseOwnedCents;
     if (isLiability(a.assetClass)) liabilities += a.baseOwnedCents;
     else assets += a.baseOwnedCents;
@@ -130,7 +131,7 @@ export interface NetWorthMover {
   /** Signed change in net-worth contribution (a loan paid down is positive). */
   deltaCents: number;
   /** What made it move: a new balance, the market, a loan schedule, a job's accrual, or only the exchange rate. */
-  driver: "balance" | "market" | "loan" | "job" | "fx";
+  driver: "balance" | "market" | "loan" | "job" | "fx" | "company";
 }
 
 export interface NetWorthMove extends NetWorthChange {
@@ -177,7 +178,9 @@ export function netWorthMoves(uid: string, ctx: ValuationContext = valuationCont
         driver:
           then.ownedCents === after.ownedCents && a.currency !== ctx.base && then.netCents !== 0
             ? "fx"
-            : after.derivedFromJob
+            : after.derivedFromCompany
+              ? "company"
+              : after.derivedFromJob
               ? "job"
               : after.derivedFromLoan
                 ? "loan"

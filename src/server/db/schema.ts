@@ -10,7 +10,7 @@ import {
   uniqueIndex,
   type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
-import type { AccountType, AssetClass, HoldingType, LoanParams } from "@/lib/domain";
+import type { AccountType, AssetClass, CompanyParams, HoldingType, LoanParams } from "@/lib/domain";
 import type { GratuityParams } from "@/lib/finance/gratuity";
 
 const createdAt = () =>
@@ -111,6 +111,12 @@ export const accounts = sqliteTable(
     loanParams: text("loan_params", { mode: "json" }).$type<LoanParams>(),
     /** A job: the balance is the end-of-service gratuity accrued under its country's law. */
     gratuityParams: text("gratuity_params", { mode: "json" }).$type<GratuityParams>(),
+    /** A company you own (type "company"): how it is valued, where it is taxed. */
+    companyParams: text("company_params", { mode: "json" }).$type<CompanyParams>(),
+    /** An account that belongs to a company (its bank, brokerage, loan): counted through the company. */
+    companyId: integer("company_id").references((): AnySQLiteColumn => accounts.id, { onDelete: "set null" }),
+    /** ISO country the account is in (a French flat: FR). Drives where its income is taxed. */
+    country: text("country"),
     notes: text("notes"),
     createdAt: createdAt(),
   },
@@ -341,6 +347,29 @@ export const reminders = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index("reminders_user").on(t.userId)],
+);
+
+/**
+ * A company's revenue and expenses for one month, entered by hand — for when
+ * its bank isn't imported, or for figures that never touch a bank (an
+ * accountant's numbers). Added to whatever its accounts' transactions show.
+ */
+export const companyFinancials = sqliteTable(
+  "company_financials",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: userId(),
+    companyId: integer("company_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    /** YYYY-MM */
+    month: text("month").notNull(),
+    /** In the company's currency, both positive. */
+    revenueCents: integer("revenue_cents").notNull().default(0),
+    expensesCents: integer("expenses_cents").notNull().default(0),
+    note: text("note"),
+  },
+  (t) => [uniqueIndex("company_financials_month").on(t.companyId, t.month)],
 );
 
 /**

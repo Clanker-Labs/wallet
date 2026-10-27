@@ -7,7 +7,9 @@ import {
   ACCOUNT_TYPES,
   ASSET_CLASSES,
   ASSET_CLASS_LABELS,
+  COUNTRIES,
   HOLDING_ACCOUNT_TYPES,
+  SPECIAL_ACCOUNT_TYPES,
   assetClassFor,
   type AccountType,
   type LoanParams,
@@ -27,12 +29,14 @@ export interface AccountFormValues {
   linkedAccountId: number | null;
   loanParams: LoanParams | null;
   notes: string | null;
+  companyId?: number | null;
+  country?: string | null;
 }
 
 const TYPES_BY_CLASS = ASSET_CLASSES.map((c) => ({
   assetClass: c,
   label: ASSET_CLASS_LABELS[c],
-  types: (Object.keys(ACCOUNT_TYPES) as AccountType[]).filter((t) => ACCOUNT_TYPES[t].assetClass === c),
+  types: (Object.keys(ACCOUNT_TYPES) as AccountType[]).filter((t) => ACCOUNT_TYPES[t].assetClass === c && !SPECIAL_ACCOUNT_TYPES.includes(t)),
 })).filter((g) => g.types.length > 0);
 
 export function AccountTypeSelect({ value, onChange }: { value: AccountType; onChange: (t: AccountType) => void }) {
@@ -100,6 +104,8 @@ export function AccountForm({
   baseCurrency,
   defaultType = "checking",
   autoFocus = false,
+  companies = [],
+  defaultCompanyId,
 }: {
   account?: AccountFormValues;
   properties: { id: number; name: string }[];
@@ -109,6 +115,10 @@ export function AccountForm({
   baseCurrency: string;
   defaultType?: AccountType;
   autoFocus?: boolean;
+  /** Companies this account can belong to. */
+  companies?: { id: number; name: string }[];
+  /** Preselected company for a new account (from /accounts?new=1&company=…). */
+  defaultCompanyId?: number;
 }) {
   const editing = Boolean(account);
   const [type, setType] = useState<AccountType>(account?.type ?? defaultType);
@@ -143,7 +153,31 @@ export function AccountForm({
           autoComplete="off"
         />
       </Field>
-      <Field label="Notes" className="sm:col-span-2">
+      <Field label="Country" hint="Where it is: decides where its income is taxed">
+        <Select name="country" defaultValue={account?.country ?? ""}>
+          <option value="">Not set</option>
+          {COUNTRIES.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {companies.length > 0 && type !== "company" ? (
+        <Field label="Belongs to a company" hint="Its bank or loan: counted through the company, not twice">
+          <Select name="companyId" defaultValue={account?.companyId ? String(account.companyId) : defaultCompanyId ? String(defaultCompanyId) : ""}>
+            <option value="">No — it's mine</option>
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      ) : (
+        <span className="hidden sm:block" />
+      )}
+      <Field label="Notes" className="sm:col-span-3">
         <Textarea name="notes" rows={1} defaultValue={account?.notes ?? ""} placeholder="Optional" />
       </Field>
       <label className="flex items-center gap-2 text-sm text-ink-2 sm:col-span-3">
@@ -182,7 +216,17 @@ export function AccountForm({
             autoComplete="off"
           />
         </Field>
-        <Field label="Type">
+        <Field
+          label="Type"
+          hint={
+            !editing ? (
+              <>
+                A job or a company? Add it from <Link href="/jobs" className="text-accent hover:underline">Jobs</Link> or{" "}
+                <Link href="/companies" className="text-accent hover:underline">Companies</Link>.
+              </>
+            ) : undefined
+          }
+        >
           <AccountTypeSelect value={type} onChange={setType} />
         </Field>
         {editing ? (

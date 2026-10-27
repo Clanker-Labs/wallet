@@ -18,6 +18,8 @@ export interface ValuationContext {
   price: PriceReader;
   holdingsByAccount: Map<number, Holding[]>;
   missingPrices: Set<string>;
+  /** Per-request memo (a company's accounts and P&L, read once for a 365-day chart). */
+  cache: Map<string, unknown>;
 }
 
 export function valuationContext(uid: string): ValuationContext {
@@ -35,6 +37,7 @@ export function valuationContext(uid: string): ValuationContext {
     price: priceReader(),
     holdingsByAccount: byAccount,
     missingPrices: new Set(),
+    cache: new Map(),
   };
 }
 

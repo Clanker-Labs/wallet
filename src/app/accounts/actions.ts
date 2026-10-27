@@ -80,7 +80,9 @@ function parseAccountForm(fd: FormData, mode: "create" | "edit"): { input?: Acco
     notes: str(fd, "notes") || null,
     loanParams: null,
     linkedAccountId: null,
+    country: str(fd, "country") || null,
   };
+  if (fd.has("companyId")) input.companyId = intId(fd.get("companyId"));
 
   if (mode === "create") {
     const balance = num(fd, "balance");

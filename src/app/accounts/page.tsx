@@ -37,7 +37,7 @@ function updatedLabel(days: number | null) {
   return `updated ${Math.round(days / 30)} months ago`;
 }
 
-export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ new?: string; type?: string }> }) {
+export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ new?: string; type?: string; company?: string }> }) {
   const uid = (await requireUser()).id;
   const params = await searchParams;
   const f = serverFormat(uid);
@@ -52,14 +52,14 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   const currencies = [...new Set<string>([...COMMON_CURRENCIES, ...all.map((a) => a.currency)])];
 
   // Totals are in the base currency; rows show each account in its own.
-  const counted = active.filter((a) => a.includeInNetWorth);
+  const counted = active.filter((a) => a.includeInNetWorth && !a.companyId); // a company's accounts count through it
   const assetsCents = counted.filter((a) => !isLiability(a.assetClass)).reduce((s, a) => s + a.baseOwnedCents, 0);
   const liabilitiesCents = counted.filter((a) => isLiability(a.assetClass)).reduce((s, a) => s + a.baseOwnedCents, 0);
   const netCents = assetsCents - liabilitiesCents;
 
   const groups = ASSET_CLASSES.map((c) => {
     const accounts = active.filter((a) => a.assetClass === c);
-    const totalCents = accounts.filter((a) => a.includeInNetWorth).reduce((s, a) => s + a.baseOwnedCents, 0);
+    const totalCents = accounts.filter((a) => a.includeInNetWorth && !a.companyId).reduce((s, a) => s + a.baseOwnedCents, 0);
     return { key: c, label: ASSET_CLASS_LABELS[c], accounts, totalCents };
   }).filter((g) => g.accounts.length > 0);
 
@@ -101,6 +101,8 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
             currencies={currencies}
             baseCurrency={f.currency}
             defaultType={defaultType}
+            companies={active.filter((x) => x.companyParams).map((x) => ({ id: x.id, name: x.name }))}
+            defaultCompanyId={Number(params.company) || undefined}
             autoFocus
           />
         </Card>
@@ -212,7 +214,7 @@ function shortTypeLabel(type: AccountWithBalance["type"]) {
 }
 
 function isStale(a: AccountWithBalance, t: string) {
-  if (a.derivedFromLoan || a.derivedFromJob || a.valuedByHoldings || !a.includeInNetWorth) return false;
+  if (a.derivedFromLoan || a.derivedFromJob || a.derivedFromCompany || a.valuedByHoldings || !a.includeInNetWorth) return false;
   return a.lastUpdated === null || daysBetween(a.lastUpdated, t) > STALE_DAYS;
 }
 
@@ -235,6 +237,7 @@ function AccountRow({ a, t, base, locale }: { a: AccountWithBalance; t: string; 
           </Link>
           {partial && <Badge>{+a.ownershipPct.toFixed(2)}%</Badge>}
           {!a.includeInNetWorth && <Badge>not counted</Badge>}
+          {a.companyId && <Badge>company&apos;s · counted through it</Badge>}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted">
           {meta && <span>{meta}</span>}

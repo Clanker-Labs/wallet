@@ -134,6 +134,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
     linkedAccountId: a.linkedAccountId,
     loanParams: a.loanParams,
     notes: a.notes,
+    companyId: a.companyId,
+    country: a.country,
   };
 
   return (
@@ -209,7 +211,23 @@ export default async function AccountPage({ params, searchParams }: Props) {
       )}
 
       {/* Primary action */}
-      {job ? (
+      {a.companyParams && a.companyParams.valuation !== "manual" ? (
+        <Card>
+          <CardHeader
+            title="Company"
+            subtitle={
+              a.companyParams.valuation === "book"
+                ? "Its value is what its own accounts hold, minus its debts — nothing to record here."
+                : "Its value comes from its last 12 months of revenue or profit — nothing to record here."
+            }
+            action={
+              <ButtonLink href="/companies" size="sm" variant="ghost">
+                Companies <ArrowRight size={14} />
+              </ButtonLink>
+            }
+          />
+        </Card>
+      ) : job ? (
         <Card>
           <CardHeader
             title="Job"
@@ -394,7 +412,13 @@ export default async function AccountPage({ params, searchParams }: Props) {
       {!job && <Card className="py-3">
         <Disclosure summaryClassName="py-1" summary={<span className="text-sm font-semibold">Edit details</span>}>
           <div className="pt-4 pb-2">
-            <AccountForm account={formValues} properties={properties} currencies={currencies} baseCurrency={f.currency} />
+            <AccountForm
+              account={formValues}
+              properties={properties}
+              currencies={currencies}
+              baseCurrency={f.currency}
+              companies={others.filter((x) => x.companyParams && !x.archivedAt).map((x) => ({ id: x.id, name: x.name }))}
+            />
           </div>
         </Disclosure>
       </Card>}

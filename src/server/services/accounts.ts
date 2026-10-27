@@ -18,6 +18,7 @@ import { loanBalanceOn } from "@/lib/finance/loan";
 import { gratuityOn, gratuityParamsSchema } from "@/lib/finance/gratuity";
 import { getSettings, today } from "./settings";
 import { holdingsValueCents, valuationContext, type ValuationContext } from "./valuation";
+import { companyMonths, trailingTwelve, type CompanyMonth } from "./company-pnl";
 
 export const currencySchema = z
   .string()
@@ -33,6 +34,18 @@ export const loanParamsSchema = z.object({
   insuranceRatePct: z.number().min(0).max(5).optional(),
 });
 
+export const companyParamsSchema = z.object({
+  country: z
+    .string()
+    .trim()
+    .length(2)
+    .transform((s) => s.toUpperCase()),
+  legalForm: z.string().trim().max(60).nullish(),
+  valuation: z.enum(["book", "revenue_multiple", "profit_multiple", "manual"]).default("book"),
+  multiple: z.number().min(0).max(100).nullish(),
+  fiscalYearStartMonth: z.number().int().min(1).max(12).nullish(),
+});
+
 export const accountInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
   institution: z.string().trim().max(120).nullish(),
@@ -44,6 +57,15 @@ export const accountInputSchema = z.object({
   linkedAccountId: z.number().int().nullish(),
   loanParams: loanParamsSchema.nullish(),
   gratuityParams: gratuityParamsSchema.nullish().describe("For a job (type end_of_service): country, dates and salary the gratuity is computed from"),
+  companyParams: companyParamsSchema.nullish().describe("For a company (type company): its country, legal form and how to value it"),
+  companyId: z.number().int().nullish().describe("The company this account belongs to (its bank, brokerage, loan)"),
+  country: z
+    .string()
+    .trim()
+    .length(2)
+    .transform((s) => s.toUpperCase())
+    .nullish()
+    .describe("ISO country the account is in (FR for a French flat): decides where its income is taxed"),
   notes: z.string().max(2000).nullish(),
   initialBalance: z.number().optional().describe("Current balance in the account currency, recorded as of today"),
 });
@@ -62,14 +84,25 @@ export interface AccountWithBalance extends Account {
   derivedFromLoan: boolean;
   /** A job: the balance is the end-of-service gratuity accrued under its country's law. */
   derivedFromJob: boolean;
+  /** A company valued from its accounts or its revenue/profit. */
+  derivedFromCompany: boolean;
   /** Value comes from holdings (stocks, ETFs…) × market prices. */
   valuedByHoldings: boolean;
   holdingsCount: number;
 }
 
+/** The company an account is attached to must be one of yours, and companies don't nest. */
+function requireCompany(uid: string, companyId: number, childIsCompany: boolean) {
+  const c = getAccountRow(uid, companyId);
+  if (!c.companyParams) throw new Error(`${c.name} is not a company.`);
+  if (childIsCompany) throw new Error("A company can't belong to another company here — add it as a separate company.");
+}
+
 export function createAccount(uid: string, raw: AccountInput): Account {
   const input = accountInputSchema.parse(raw);
   if (input.type === "end_of_service" && !input.gratuityParams) throw new Error("A job needs its country, start date and salary (gratuityParams).");
+  if (input.type === "company" && !input.companyParams) throw new Error("A company needs its country and how to value it (companyParams).");
+  if (input.companyId) requireCompany(uid, input.companyId, input.type === "company");
   const assetClass: AssetClass = input.assetClass ?? assetClassFor(input.type);
   if (input.linkedAccountId) getAccountRow(uid, input.linkedAccountId);
   const account = db()
@@ -86,11 +119,14 @@ export function createAccount(uid: string, raw: AccountInput): Account {
       linkedAccountId: input.linkedAccountId ?? null,
       loanParams: input.loanParams ?? null,
       gratuityParams: input.gratuityParams ?? null,
+      companyParams: input.companyParams ?? null,
+      companyId: input.companyId ?? null,
+      country: input.country ?? input.companyParams?.country ?? null,
       notes: input.notes ?? null,
     })
     .returning()
     .get();
-  if (input.initialBalance !== undefined && !input.loanParams && !input.gratuityParams) {
+  if (input.initialBalance !== undefined && !input.loanParams && !input.gratuityParams && (!input.companyParams || input.companyParams.valuation === "manual")) {
     recordBalance(uid, { accountId: account.id, balance: input.initialBalance, source: "manual" });
   }
   return account;
@@ -115,6 +151,15 @@ export function updateAccount(uid: string, id: number, raw: Partial<AccountInput
   }
   if (input.loanParams !== undefined) patch.loanParams = input.loanParams ?? null;
   if (input.gratuityParams !== undefined) patch.gratuityParams = input.gratuityParams ?? null;
+  if (input.companyParams !== undefined) patch.companyParams = input.companyParams ?? null;
+  if (input.country !== undefined) patch.country = input.country ?? null;
+  if (input.companyId !== undefined) {
+    if (input.companyId) {
+      if (input.companyId === id) throw new Error("An account can't belong to itself.");
+      requireCompany(uid, input.companyId, !!getAccountRow(uid, id).companyParams);
+    }
+    patch.companyId = input.companyId ?? null;
+  }
   if (input.notes !== undefined) patch.notes = input.notes ?? null;
   return db()
     .update(accounts)
@@ -185,6 +230,8 @@ function writeSnapshot(accountId: number, date: string, cents: number, note: str
 export function recordBalance(uid: string, raw: z.input<typeof recordBalanceSchema>) {
   const input = recordBalanceSchema.parse(raw);
   const account = getAccountRow(uid, input.accountId);
+  if (account.companyParams && account.companyParams.valuation !== "manual" && input.balance !== 0)
+    throw new Error(`${account.name} is valued from ${account.companyParams.valuation === "book" ? "its accounts" : "its revenue or profit"}. Switch its valuation to manual to record a value.`);
   if (account.loanParams && input.balance !== 0)
     throw new Error(`${account.name} follows its amortization schedule, so a recorded balance would be ignored. Change its loan terms instead (edit the account), or archive it once repaid.`);
   if (account.gratuityParams && input.balance !== 0)
@@ -244,11 +291,15 @@ type Snap = { date: string; balanceCents: number };
 
 /** Balance of one account on a date, in its own currency. */
 export function balanceOnDate(
-  account: Pick<Account, "id" | "currency" | "loanParams"> & Partial<Pick<Account, "gratuityParams" | "archivedAt" | "createdAt">>,
+  account: Pick<Account, "id" | "currency" | "loanParams"> & Partial<Pick<Account, "gratuityParams" | "archivedAt" | "createdAt" | "companyParams">>,
   snapshots: Snap[],
   date: string,
   ctx: ValuationContext,
-): { cents: number; lastUpdated: string | null; derived: "loan" | "job" | "holdings" | null } {
+): { cents: number; lastUpdated: string | null; derived: "loan" | "job" | "holdings" | "company" | null } {
+  if (account.companyParams && account.companyParams.valuation !== "manual") {
+    if (account.archivedAt && date >= account.archivedAt) return { cents: 0, lastUpdated: account.archivedAt, derived: null };
+    return { cents: companyValueCents(account as Account, date, ctx), lastUpdated: date, derived: "company" };
+  }
   if (account.gratuityParams) {
     // Paid out: a zero snapshot (archiving records one) ends the accrual.
     const paid = snapshots.findLast((s) => s.date <= date && s.balanceCents === 0);
@@ -286,6 +337,46 @@ export function balanceOnDate(
   return { cents: found?.balanceCents ?? 0, lastUpdated: found?.date ?? null, derived: null };
 }
 
+/**
+ * What a company is worth on a date, in its currency, before your ownership
+ * share: its accounts' net value (book), or trailing-12-month revenue or
+ * profit times a multiple.
+ */
+export function companyValueCents(company: Account, date: string, ctx: ValuationContext): number {
+  const p = company.companyParams!;
+  if (p.valuation === "book") {
+    const key = `company-children:${company.id}`;
+    let kids = ctx.cache.get(key) as { accounts: Account[]; snaps: Map<number, Snap[]> } | undefined;
+    if (!kids) {
+      const accounts_ = db()
+        .select()
+        .from(accounts)
+        .where(and(eq(accounts.userId, ctx.uid), eq(accounts.companyId, company.id)))
+        .all()
+        .filter((a) => !a.companyParams); // no companies inside companies
+      kids = { accounts: accounts_, snaps: snapshotsByAccount(ctx.uid, accounts_.map((a) => a.id)) };
+      ctx.cache.set(key, kids);
+    }
+    let total = 0;
+    for (const k of kids.accounts) {
+      if (k.archivedAt && k.archivedAt <= date) continue;
+      const b = balanceOnDate(k, kids.snaps.get(k.id) ?? [], date, ctx);
+      const owned = Math.round((b.cents * k.ownershipPct) / 100);
+      total += (isLiability(k.assetClass) ? -1 : 1) * ctx.fx.convertCents(owned, k.currency, company.currency, date);
+    }
+    return total;
+  }
+  const key = `company-pnl:${company.id}`;
+  let months = ctx.cache.get(key) as CompanyMonth[] | undefined;
+  if (!months) {
+    months = companyMonths(ctx.uid, company, ctx.fx);
+    ctx.cache.set(key, months);
+  }
+  const ttm = trailingTwelve(months, date);
+  const multiple = p.multiple ?? (p.valuation === "revenue_multiple" ? 1 : 5);
+  return Math.round((p.valuation === "revenue_multiple" ? ttm.revenueCents : Math.max(0, ttm.profitCents)) * multiple);
+}
+
 export function withBalance(account: Account, snapshots: Snap[], date: string, ctx: ValuationContext): AccountWithBalance {
   const b = balanceOnDate(account, snapshots, date, ctx);
   const ownedCents = Math.round((b.cents * account.ownershipPct) / 100);
@@ -296,10 +387,12 @@ export function withBalance(account: Account, snapshots: Snap[], date: string, c
     balanceCents: b.cents,
     ownedCents,
     baseOwnedCents,
-    netCents: account.includeInNetWorth ? sign * baseOwnedCents : 0,
+    // A company's own accounts are counted through the company, not again on their own.
+    netCents: account.includeInNetWorth && !account.companyId ? sign * baseOwnedCents : 0,
     lastUpdated: b.lastUpdated,
     derivedFromLoan: b.derived === "loan",
     derivedFromJob: b.derived === "job",
+    derivedFromCompany: b.derived === "company",
     valuedByHoldings: b.derived === "holdings",
     holdingsCount: ctx.holdingsByAccount.get(account.id)?.length ?? 0,
   };
@@ -386,6 +479,7 @@ export function staleAccounts(uid: string, days = 35): AccountWithBalance[] {
     (a) =>
       !a.derivedFromLoan &&
       !a.derivedFromJob &&
+      !a.derivedFromCompany &&
       !a.valuedByHoldings &&
       a.includeInNetWorth &&
       (a.lastUpdated === null || a.lastUpdated < cutoff),

@@ -43,6 +43,13 @@
       "when": 1793107615852,
       "tag": "0005_rules_splits_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793108139924,
+      "tag": "0006_companies",
+      "breakpoints": true
     }
   ]
 }

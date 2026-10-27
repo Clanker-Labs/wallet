@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { DateTime } from "luxon";
-import { ArrowLeftRight, Briefcase, Landmark, LineChart, PencilLine } from "lucide-react";
+import { ArrowLeftRight, Briefcase, Building2, Landmark, LineChart, PencilLine } from "lucide-react";
 import type { AssetClass } from "@/lib/domain";
 import { DailyChangeChart, NetWorthChart } from "./charts";
 import { useFormat } from "./format";
@@ -107,7 +107,7 @@ export interface MoveView {
   fromDate: string;
   deltaCents: number;
   deltaPct: number | null;
-  movers: { accountId: number; name: string; assetClass: AssetClass; deltaCents: number; driver: "balance" | "market" | "loan" | "job" | "fx" }[];
+  movers: { accountId: number; name: string; assetClass: AssetClass; deltaCents: number; driver: "balance" | "market" | "loan" | "job" | "fx" | "company" }[];
 }
 
 const DRIVER = {
@@ -116,6 +116,7 @@ const DRIVER = {
   loan: { icon: Landmark, text: "loan repaid" },
   job: { icon: Briefcase, text: "gratuity accrued" },
   fx: { icon: ArrowLeftRight, text: "exchange rate" },
+  company: { icon: Building2, text: "business value" },
 } as const;
 
 /** Which accounts moved net worth, per period, as diverging bars. */

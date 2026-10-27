@@ -10,6 +10,7 @@ export const ASSET_CLASSES = [
   "real_estate",
   "crypto",
   "commodities",
+  "business",
   "other",
   "liabilities",
 ] as const;
@@ -22,6 +23,7 @@ export const ASSET_CLASS_LABELS: Record<AssetClass, string> = {
   real_estate: "Real estate",
   crypto: "Crypto",
   commodities: "Commodities",
+  business: "Business",
   other: "Other assets",
   liabilities: "Liabilities",
 };
@@ -38,6 +40,7 @@ export const ASSET_CLASS_SLOT: Record<Exclude<AssetClass, "liabilities">, number
   crypto: 5,
   commodities: 6,
   other: 7,
+  business: 8,
 };
 
 export const ACCOUNT_TYPES = {
@@ -52,6 +55,7 @@ export const ACCOUNT_TYPES = {
   crypto: { label: "Crypto", assetClass: "crypto" },
   precious_metals: { label: "Precious metals & commodities", assetClass: "commodities" },
   real_estate: { label: "Real estate", assetClass: "real_estate" },
+  company: { label: "Company (your share of a business)", assetClass: "business" },
   vehicle: { label: "Vehicle", assetClass: "other" },
   other_asset: { label: "Other asset", assetClass: "other" },
   mortgage: { label: "Mortgage", assetClass: "liabilities" },
@@ -130,6 +134,26 @@ export function isCurrencyCode(code: string): boolean {
 }
 
 /** Fixed-rate amortizing loan. Amounts are in currency units (not cents). */
+/**
+ * A business you own (all or part of: the account's ownershipPct). Its own
+ * bank, brokerage and loan accounts point at it (accounts.companyId) and are
+ * counted through it, never twice.
+ */
+export interface CompanyParams {
+  /** ISO country of the company (for corporate tax): AE, FR… */
+  country: string;
+  legalForm?: string | null;
+  /**
+   * book: its accounts' net value (cash + holdings − debts) ·
+   * revenue_multiple / profit_multiple: trailing-12-month figure × multiple ·
+   * manual: balances you record.
+   */
+  valuation: "book" | "revenue_multiple" | "profit_multiple" | "manual";
+  multiple?: number | null;
+  /** First month of the financial year (1 = January). */
+  fiscalYearStartMonth?: number | null;
+}
+
 export interface LoanParams {
   principal: number;
   annualRatePct: number;
@@ -167,3 +191,31 @@ export const DEFAULT_CATEGORIES: { name: string; kind: CategoryKind; icon: strin
   { name: "Transfers", kind: "transfer", icon: "🔀" },
   { name: "Savings & investing", kind: "transfer", icon: "🐖" },
 ];
+
+/** Countries offered for accounts and companies (ISO 3166 alpha-2), the ones tax rules exist for first. */
+export const COUNTRIES: { code: string; name: string }[] = [
+  { code: "AE", name: "United Arab Emirates" },
+  { code: "FR", name: "France" },
+  { code: "GB", name: "United Kingdom" },
+  { code: "US", name: "United States" },
+  { code: "SA", name: "Saudi Arabia" },
+  { code: "QA", name: "Qatar" },
+  { code: "DE", name: "Germany" },
+  { code: "ES", name: "Spain" },
+  { code: "IT", name: "Italy" },
+  { code: "PT", name: "Portugal" },
+  { code: "BE", name: "Belgium" },
+  { code: "NL", name: "Netherlands" },
+  { code: "CH", name: "Switzerland" },
+  { code: "LU", name: "Luxembourg" },
+  { code: "IE", name: "Ireland" },
+  { code: "SG", name: "Singapore" },
+  { code: "HK", name: "Hong Kong" },
+  { code: "CA", name: "Canada" },
+  { code: "AU", name: "Australia" },
+  { code: "MA", name: "Morocco" },
+  { code: "IN", name: "India" },
+];
+
+/** Account types with their own page and terms, not created from the generic account form. */
+export const SPECIAL_ACCOUNT_TYPES: AccountType[] = ["end_of_service", "company"];

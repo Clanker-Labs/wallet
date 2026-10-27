@@ -18,6 +18,7 @@ import { scheduleBalanceOn } from "@/lib/finance/loan";
 import { gratuityOn, gratuityParamsSchema } from "@/lib/finance/gratuity";
 import { getSettings, today } from "./settings";
 import { holdingsValueCents, valuationContext, type ValuationContext } from "./valuation";
+import { fxConverter } from "./fx";
 import { companyMonths, trailingTwelve, type CompanyMonth } from "./company-pnl";
 
 export const currencySchema = z
@@ -145,9 +146,33 @@ export function createAccount(uid: string, raw: AccountInput): Account {
   return account;
 }
 
-export function updateAccount(uid: string, id: number, raw: Partial<AccountInput>): Account {
-  getAccountRow(uid, id);
+/**
+ * relabel: the currency was wrong, the numbers are right (keep them).
+ * convert: the account really changed currency — convert every past balance
+ * at its own date's rate, so history keeps its value.
+ */
+export type CurrencyChange = "relabel" | "convert";
+
+export function updateAccount(uid: string, id: number, raw: Partial<AccountInput> & { currencyChange?: CurrencyChange }): Account {
+  const before = getAccountRow(uid, id);
   const input = accountInputSchema.partial().parse(raw);
+  if (input.currency !== undefined && input.currency !== before.currency) {
+    const snaps = db().select({ id: balanceSnapshots.id, date: balanceSnapshots.date, balanceCents: balanceSnapshots.balanceCents }).from(balanceSnapshots).where(eq(balanceSnapshots.accountId, id)).all();
+    if (snaps.some((s) => s.balanceCents !== 0) && !raw.currencyChange)
+      throw new Error(
+        `${before.name} has ${snaps.length} recorded balance${snaps.length > 1 ? "s" : ""} in ${before.currency}. Say whether the currency was just wrong (relabel: keep the numbers) or the account really changed currency (convert: each past balance at its date's rate).`,
+      );
+    if (raw.currencyChange === "convert") {
+      const fx = fxConverter();
+      // Convert first, write only if every date had a rate: never half a history.
+      const converted = snaps.map((s) => ({ id: s.id, cents: fx.convertCents(s.balanceCents, before.currency, input.currency!, s.date) }));
+      if (fx.missing.size) throw new Error(`No exchange rate for ${[...fx.missing].join(", ")} on some of those dates — nothing was changed.`);
+      const stmt = db().$client.prepare("UPDATE balance_snapshots SET balance_cents = ? WHERE id = ?");
+      db().$client.transaction(() => {
+        for (const c of converted) stmt.run(c.cents, c.id);
+      })();
+    }
+  }
   const patch: Partial<typeof accounts.$inferInsert> = {};
   if (input.name !== undefined) patch.name = input.name;
   if (input.institution !== undefined) patch.institution = input.institution ?? null;

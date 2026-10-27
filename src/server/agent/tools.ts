@@ -768,8 +768,12 @@ export const TOOLS = [
   tool({
     name: "update_account",
     title: "Update account",
-    description: "Change an account's name, institution, type, currency, ownership share, loan terms or notes.",
-    input: accountsSvc.accountInputSchema.partial().omit({ initialBalance: true }).extend({ accountId: z.number().int() }),
+    description:
+      "Change an account's name, institution, type, currency, ownership share, loan terms, country, company or notes. Changing the currency of an account with recorded balances needs currencyChange: 'relabel' (the currency was wrong, keep the numbers) or 'convert' (it really changed: each past balance is converted at its date's rate).",
+    input: accountsSvc.accountInputSchema
+      .partial()
+      .omit({ initialBalance: true })
+      .extend({ accountId: z.number().int(), currencyChange: z.enum(["relabel", "convert"]).optional() }),
     readOnly: false,
     run: ({ accountId, ...patch }, { userId }) => accountsSvc.updateAccount(userId, accountId, patch),
   }),

@@ -232,7 +232,18 @@ export function AccountForm({
         {editing ? (
           <Field
             label="Currency"
-            hint={currency !== account!.currency ? "Past balances keep their numbers: they aren't converted" : undefined}
+            hint={
+              currency !== account!.currency ? (
+                <span className="mt-1 flex flex-col gap-1">
+                  <label className="flex items-center gap-1.5">
+                    <input type="radio" name="currencyChange" value="relabel" defaultChecked /> It was wrong: keep the numbers
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input type="radio" name="currencyChange" value="convert" /> It changed: convert past balances
+                  </label>
+                </span>
+              ) : undefined
+            }
           >
             <CurrencySelect value={currency} onChange={setCurrency} currencies={currencies} />
           </Field>

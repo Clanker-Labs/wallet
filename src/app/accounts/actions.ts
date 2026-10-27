@@ -145,7 +145,8 @@ export async function updateAccountAction(fd: FormData): Promise<AccountActionSt
   if (!input) return { ok: false, message: error! };
   if (input.linkedAccountId === id) input.linkedAccountId = null;
   try {
-    updateAccount(uid, id, input);
+    const change = str(fd, "currencyChange");
+    updateAccount(uid, id, { ...input, ...(change === "relabel" || change === "convert" ? { currencyChange: change } : {}) });
     refresh();
     return { ok: true, message: "Saved", id };
   } catch (e) {

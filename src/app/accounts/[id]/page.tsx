@@ -13,7 +13,8 @@ import {
   isLiability,
 } from "@/lib/domain";
 import { addDays, addMonths, endOfMonth, formatDate, formatMonth, monthRange } from "@/lib/dates";
-import { monthlyPayment, paymentsMade } from "@/lib/finance/loan";
+import { loanEndDate, loanSchedule, monthlyPayment, paymentOn, paymentsMade } from "@/lib/finance/loan";
+import { LoanEvents } from "@/components/loan-events";
 import { Badge, Button, ButtonLink, Card, CardHeader, Delta, SeriesDot, Stat } from "@/components/ui";
 import { FormatProvider } from "@/components/format";
 import {
@@ -110,15 +111,23 @@ export default async function AccountPage({ params, searchParams }: Props) {
 
   const loanStats = loan
     ? (() => {
-        const pmt = monthlyPayment(loan.principal, loan.annualRatePct, loan.durationMonths);
+        // The real schedule: early repayments and renegotiated rates included.
+        const payments = loanSchedule(loan).filter((r) => r.kind === "payment");
+        const pmt = loan.events?.length ? paymentOn(loan, t) || (payments[0]?.payment ?? 0) : monthlyPayment(loan.principal, loan.annualRatePct, loan.durationMonths);
         const insurance = ((loan.insuranceRatePct ?? 0) / 100 / 12) * loan.principal;
-        const made = paymentsMade(loan, t);
+        const made = loan.events?.length ? payments.filter((r) => r.date <= t).length : paymentsMade(loan, t);
+        const total = loan.events?.length ? payments.length : loan.durationMonths;
+        const end = loan.events?.length ? loanEndDate(loan) : null;
+        const rateNow = payments.find((r) => r.date >= t)?.ratePct ?? loan.annualRatePct;
         return {
           monthlyCents: Math.round((pmt + insurance) * 100),
           insuranceCents: Math.round(insurance * 100),
           made,
-          left: loan.durationMonths - made,
-          endMonth: addMonths(loan.startDate.slice(0, 7), loan.durationMonths - 1),
+          total,
+          left: total - made,
+          rateNow,
+          interestLeftCents: Math.round(payments.filter((r) => r.date > t).reduce((s, r) => s + r.interest, 0) * 100),
+          endMonth: end ? end.slice(0, 7) : addMonths(loan.startDate.slice(0, 7), loan.durationMonths - 1),
         };
       })()
     : null;
@@ -250,7 +259,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
         <Card>
           <CardHeader
             title="Loan"
-            subtitle="The balance updates itself from the amortization schedule — nothing to record."
+            subtitle="The balance follows the amortization schedule. Repaid early or renegotiated the rate? Add it below and the schedule follows."
           />
           <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
             <Stat
@@ -258,9 +267,16 @@ export default async function AccountPage({ params, searchParams }: Props) {
               value={native(loanStats.monthlyCents)}
               delta={loanStats.insuranceCents > 0 ? <span className="text-muted">incl. {native(loanStats.insuranceCents)} insurance</span> : undefined}
             />
-            <Stat label="Borrowed" value={native(Math.round(loan.principal * 100), { whole: true })} delta={<span className="text-muted">at {loan.annualRatePct}%</span>} />
-            <Stat label="Payments made" value={`${loanStats.made} / ${loan.durationMonths}`} delta={<span className="text-muted">{loanStats.left} to go</span>} />
+            <Stat
+              label="Borrowed"
+              value={native(Math.round(loan.principal * 100), { whole: true })}
+              delta={<span className="text-muted">at {loan.annualRatePct}%{loanStats.rateNow !== loan.annualRatePct && `, now ${loanStats.rateNow}%`}</span>}
+            />
+            <Stat label="Payments made" value={`${loanStats.made} / ${loanStats.total}`} delta={<span className="text-muted">{loanStats.left} to go · {native(loanStats.interestLeftCents, { whole: true })} interest left</span>} />
             <Stat label="Paid off" value={formatMonth(loanStats.endMonth)} delta={<span className="text-muted">first payment {formatDate(loan.startDate)}</span>} />
+          </div>
+          <div className="mt-5 border-t border-border pt-4">
+            <LoanEvents accountId={a.id} events={loan.events ?? []} currency={a.currency} today={t} />
           </div>
         </Card>
       ) : a.valuedByHoldings ? (

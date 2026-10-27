@@ -696,6 +696,28 @@ export const TOOLS = [
     },
   }),
   tool({
+    name: "add_loan_event",
+    title: "Record an early repayment or a new rate",
+    description:
+      "For a loan with a schedule: record an early repayment (type prepayment, amount) or a renegotiated rate (type rate_change, ratePct) on a date. keep 'duration' keeps the end date and lowers the payment; keep 'payment' keeps the payment and ends the loan sooner. The balance, remaining interest and end date follow.",
+    input: z.object({
+      accountId: z.number().int(),
+      date: isoDate,
+      type: z.enum(["prepayment", "rate_change"]),
+      amount: z.number().positive().optional(),
+      ratePct: z.number().min(0).max(30).optional(),
+      keep: z.enum(["duration", "payment"]).default("duration"),
+    }),
+    readOnly: false,
+    run: ({ accountId, ...ev }, { userId }) => {
+      const acc = accountsSvc.getAccountRow(userId, accountId);
+      if (!acc.loanParams) throw new Error(`${acc.name} has no loan schedule.`);
+      const updated = accountsSvc.updateAccount(userId, accountId, { loanParams: { ...acc.loanParams, events: [...(acc.loanParams.events ?? []), ev] } });
+      invalidateSqlSandbox(userId);
+      return { account: updated.name, events: updated.loanParams?.events };
+    },
+  }),
+  tool({
     name: "update_account",
     title: "Update account",
     description: "Change an account's name, institution, type, currency, ownership share, loan terms or notes.",

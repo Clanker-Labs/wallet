@@ -8,6 +8,7 @@ import {
   createAccount,
   deleteAccount,
   deleteSnapshot,
+  getAccountRow,
   recordBalance,
   unarchiveAccount,
   updateAccount,
@@ -213,4 +214,18 @@ export async function deleteAccountAction(fd: FormData): Promise<void> {
   deleteAccount(uid, id);
   refresh();
   redirect("/accounts");
+}
+
+/** Add or remove an early repayment / rate change on a loan; the schedule is recomputed. */
+export async function saveLoanEventsAction(accountId: number, events: NonNullable<LoanParams["events"]>): Promise<AccountActionState> {
+  const uid = await requireUid();
+  try {
+    const acc = getAccountRow(uid, accountId);
+    if (!acc.loanParams) return { ok: false, message: "This account has no loan schedule." };
+    updateAccount(uid, accountId, { loanParams: { ...acc.loanParams, events } });
+    refresh();
+    return { ok: true, message: "Schedule updated" };
+  } catch (e) {
+    return { ok: false, message: errorMessage(e) };
+  }
 }

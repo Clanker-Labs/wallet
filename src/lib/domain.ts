@@ -133,7 +133,6 @@ export function isCurrencyCode(code: string): boolean {
   return /^[A-Z0-9]{2,6}$/.test(normalizeCurrency(code));
 }
 
-/** Fixed-rate amortizing loan. Amounts are in currency units (not cents). */
 /**
  * A business you own (all or part of: the account's ownershipPct). Its own
  * bank, brokerage and loan accounts point at it (accounts.companyId) and are
@@ -154,6 +153,7 @@ export interface CompanyParams {
   fiscalYearStartMonth?: number | null;
 }
 
+/** Fixed-rate amortizing loan. Amounts are in currency units (not cents). */
 export interface LoanParams {
   principal: number;
   annualRatePct: number;
@@ -162,6 +162,22 @@ export interface LoanParams {
   startDate: string;
   /** Borrower insurance, % of initial principal per year (French style). */
   insuranceRatePct?: number;
+  /** What changed since: early repayments, renegotiated rates. */
+  events?: LoanEvent[];
+}
+
+/**
+ * prepayment: `amount` of principal repaid early on `date`. rate_change: the
+ * rate becomes `ratePct` from `date` (a renegotiation). After either, `keep`
+ * says what stays the same: the end date ("duration", the payment changes)
+ * or the monthly payment ("payment", the loan ends sooner or later).
+ */
+export interface LoanEvent {
+  date: string;
+  type: "prepayment" | "rate_change";
+  amount?: number;
+  ratePct?: number;
+  keep?: "duration" | "payment";
 }
 
 export type CategoryKind = "income" | "expense" | "transfer";

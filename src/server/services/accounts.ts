@@ -14,7 +14,7 @@ import {
 } from "@/lib/domain";
 import { toCents } from "@/lib/money";
 import { addDays, isISODate } from "@/lib/dates";
-import { loanBalanceOn } from "@/lib/finance/loan";
+import { scheduleBalanceOn } from "@/lib/finance/loan";
 import { gratuityOn, gratuityParamsSchema } from "@/lib/finance/gratuity";
 import { getSettings, today } from "./settings";
 import { holdingsValueCents, valuationContext, type ValuationContext } from "./valuation";
@@ -32,6 +32,19 @@ export const loanParamsSchema = z.object({
   durationMonths: z.number().int().min(1).max(600),
   startDate: z.string().refine(isISODate, "Expected YYYY-MM-DD"),
   insuranceRatePct: z.number().min(0).max(5).optional(),
+  events: z
+    .array(
+      z.object({
+        date: z.string().refine(isISODate, "Expected YYYY-MM-DD"),
+        type: z.enum(["prepayment", "rate_change"]),
+        amount: z.number().positive().optional(),
+        ratePct: z.number().min(0).max(30).optional(),
+        keep: z.enum(["duration", "payment"]).optional(),
+      }),
+    )
+    .max(100)
+    .optional()
+    .describe("Early repayments and rate renegotiations since the start"),
 });
 
 export const companyParamsSchema = z.object({
@@ -313,7 +326,7 @@ export function balanceOnDate(
     if (closing) return { cents: 0, lastUpdated: closing.date, derived: null };
     // Funds are released about a month before the first payment.
     if (date < addDays(account.loanParams.startDate, -31)) return { cents: 0, lastUpdated: null, derived: "loan" };
-    return { cents: toCents(loanBalanceOn(account.loanParams, date)), lastUpdated: date, derived: "loan" };
+    return { cents: toCents(scheduleBalanceOn(account.loanParams, date)), lastUpdated: date, derived: "loan" };
   }
   let found: Snap | undefined;
   for (const s of snapshots) {

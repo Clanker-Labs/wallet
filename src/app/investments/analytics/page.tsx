@@ -1,10 +1,9 @@
-import Link from "next/link";
 import { DateTime } from "luxon";
 import { investmentAnalytics, type Slice } from "@/server/services/investment-analytics";
 import { serverFormat } from "@/server/format";
-import { holdingTypeLabel } from "@/components/investments-model";
+import { INVESTMENT_TABS, holdingTypeLabel } from "@/components/investments-model";
 import type { HoldingType } from "@/lib/domain";
-import { Card, CardHeader, EmptyState, PageHeader, SeriesDot, Stat } from "@/components/ui";
+import { Card, CardHeader, EmptyState, PageHeader, SeriesDot, Stat, ViewTabs } from "@/components/ui";
 import { AllocationDonut, DrawdownChart, IndexChart, MonthlyReturns, NetWorthChart, Sparkline } from "@/components/charts";
 import { requireUser } from "@/server/session";
 import { CountUp } from "@/components/count-up";
@@ -48,14 +47,7 @@ export default async function InvestmentAnalyticsPage() {
         title="Investments"
         subtitle="How the portfolio you hold today has done: returns, risk and where it sits"
         actions={
-          <nav className="inline-flex gap-0.5 rounded-lg bg-surface-2 p-0.5 text-sm" aria-label="Investments views">
-            <Link href="/investments" className="rounded-md px-3 py-1 text-ink-2 hover:text-ink">
-              Holdings
-            </Link>
-            <span className="rounded-md bg-surface px-3 py-1 font-medium text-ink shadow-sm" aria-current="page">
-              Analytics
-            </span>
-          </nav>
+          <ViewTabs label="Investments views" current="/investments/analytics" tabs={INVESTMENT_TABS} />
         }
       />
 

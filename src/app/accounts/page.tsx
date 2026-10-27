@@ -66,7 +66,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   const staleCount = active.filter((a) => isStale(a, t)).length;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 md:space-y-6">
       <PageHeader
         title="Accounts"
         subtitle={
@@ -115,56 +115,87 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
         </EmptyState>
       ) : (
         <>
-          {groups.map((g) => {
-            const liability = isLiability(g.key);
-            const pct = assetsCents > 0 ? (g.totalCents / assetsCents) * 100 : 0;
-            return (
-              <Card key={g.key} className="pb-2">
-                <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
-                  <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold">
-                    {!liability && <SeriesDot slot={ASSET_CLASS_SLOT[g.key as keyof typeof ASSET_CLASS_SLOT]} />}
-                    <span className="truncate">{g.label}</span>
-                    <span className="font-normal text-muted">{g.accounts.length}</span>
-                  </h2>
-                  <div className="flex shrink-0 items-baseline gap-3">
-                    <span
-                      className="tabular text-xs text-muted"
-                      title={liability ? "Debt as a share of gross assets" : "Share of gross assets"}
-                    >
-                      {pct.toFixed(1)}%
-                    </span>
-                    <span className={liability ? "tabular font-semibold text-critical-text" : "tabular font-semibold"}>
-                      {f.money(liability ? -g.totalCents : g.totalCents, { whole: true })}
-                    </span>
-                  </div>
-                </div>
-                <ul className="divide-y divide-border">
-                  {g.accounts.map((a) => (
-                    <AccountRow key={a.id} a={a} t={t} base={f.currency} locale={f.locale} />
-                  ))}
-                </ul>
-              </Card>
-            );
-          })}
-
-          <Card>
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <div className="text-sm text-muted">Net worth · {f.currency}</div>
-                <div className="tabular mt-1 text-3xl font-semibold tracking-tight">{f.money(netCents, { whole: true })}</div>
+          <Card className="bg-hero p-5 md:p-7">
+            <div className="flex flex-wrap items-end justify-between gap-6">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-ink-2">Net worth · {f.currency}</div>
+                <div className="display-lg tabular mt-1.5">{f.money(netCents, { whole: true })}</div>
               </div>
-              <div className="flex gap-6 text-sm">
+              <dl className="flex gap-8 md:gap-12">
                 <div>
-                  <div className="text-xs text-muted">Assets</div>
-                  <div className="tabular font-medium">{f.money(assetsCents, { whole: true })}</div>
+                  <dt className="text-xs font-medium text-muted">Assets</dt>
+                  <dd className="tabular mt-1 text-lg font-semibold tracking-tight md:text-xl">{f.money(assetsCents, { whole: true })}</dd>
                 </div>
                 <div>
-                  <div className="text-xs text-muted">Liabilities</div>
-                  <div className="tabular font-medium">{f.money(liabilitiesCents ? -liabilitiesCents : 0, { whole: true })}</div>
+                  <dt className="text-xs font-medium text-muted">Liabilities</dt>
+                  <dd className={`tabular mt-1 text-lg font-semibold tracking-tight md:text-xl ${liabilitiesCents ? "text-critical-text" : ""}`}>{f.money(liabilitiesCents ? -liabilitiesCents : 0, { whole: true })}</dd>
                 </div>
-              </div>
+                <div>
+                  <dt className="text-xs font-medium text-muted">Accounts</dt>
+                  <dd className="tabular mt-1 text-lg font-semibold tracking-tight md:text-xl">{active.length}</dd>
+                </div>
+              </dl>
             </div>
+            {assetsCents > 0 && (
+              <div className="mt-6">
+                <div className="flex h-3 w-full gap-0.5 overflow-hidden rounded-full" role="img" aria-label="Assets by class">
+                  {groups
+                    .filter((g) => !isLiability(g.key) && g.totalCents > 0)
+                    .map((g) => (
+                      <div
+                        key={g.key}
+                        className="animate-grow h-full first:rounded-l-full last:rounded-r-full"
+                        style={{ width: `${(g.totalCents / assetsCents) * 100}%`, background: `var(--series-${ASSET_CLASS_SLOT[g.key as keyof typeof ASSET_CLASS_SLOT]})` }}
+                        title={`${g.label}: ${((g.totalCents / assetsCents) * 100).toFixed(1)}%`}
+                      />
+                    ))}
+                </div>
+                <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
+                  {groups
+                    .filter((g) => !isLiability(g.key) && g.totalCents > 0)
+                    .map((g) => (
+                      <li key={g.key} className="inline-flex items-center gap-1.5">
+                        <SeriesDot slot={ASSET_CLASS_SLOT[g.key as keyof typeof ASSET_CLASS_SLOT]} />
+                        <span className="text-ink-2">{g.label}</span>
+                        <span className="tabular font-medium">{((g.totalCents / assetsCents) * 100).toFixed(1)}%</span>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            )}
           </Card>
+
+          <div className="grid items-start gap-5 md:gap-6 2xl:grid-cols-2">
+            {groups.map((g) => {
+              const liability = isLiability(g.key);
+              const pct = assetsCents > 0 ? (g.totalCents / assetsCents) * 100 : 0;
+              const slot = liability ? null : ASSET_CLASS_SLOT[g.key as keyof typeof ASSET_CLASS_SLOT];
+              return (
+                <Card key={g.key} className="pb-2 md:pb-3">
+                  <div className="flex items-center justify-between gap-3 border-b border-border pb-4">
+                    <h2 className="flex min-w-0 items-center gap-2.5 text-[0.9375rem] font-semibold">
+                      {slot !== null && <SeriesDot slot={slot} />}
+                      <span className="truncate">{g.label}</span>
+                      <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-muted">{g.accounts.length}</span>
+                    </h2>
+                    <div className="flex shrink-0 items-baseline gap-3">
+                      <span className="tabular text-xs text-muted" title={liability ? "Debt as a share of gross assets" : "Share of gross assets"}>
+                        {pct.toFixed(1)}%
+                      </span>
+                      <span className={liability ? "tabular text-lg font-semibold tracking-tight text-critical-text" : "tabular text-lg font-semibold tracking-tight"}>
+                        {f.money(liability ? -g.totalCents : g.totalCents, { whole: true })}
+                      </span>
+                    </div>
+                  </div>
+                  <ul className="divide-y divide-border">
+                    {g.accounts.map((a) => (
+                      <AccountRow key={a.id} a={a} t={t} base={f.currency} locale={f.locale} slot={slot} />
+                    ))}
+                  </ul>
+                </Card>
+              );
+            })}
+          </div>
         </>
       )}
 
@@ -218,7 +249,7 @@ function isStale(a: AccountWithBalance, t: string) {
   return a.lastUpdated === null || daysBetween(a.lastUpdated, t) > STALE_DAYS;
 }
 
-function AccountRow({ a, t, base, locale }: { a: AccountWithBalance; t: string; base: string; locale: string }) {
+function AccountRow({ a, t, base, locale, slot }: { a: AccountWithBalance; t: string; base: string; locale: string; slot: number | null }) {
   const liability = isLiability(a.assetClass);
   const sign = liability ? -1 : 1;
   const days = a.lastUpdated ? daysBetween(a.lastUpdated, t) : null;
@@ -229,10 +260,20 @@ function AccountRow({ a, t, base, locale }: { a: AccountWithBalance; t: string; 
   const native = (cents: number) => moneyIn(cents, a.currency, locale, { whole: true });
 
   return (
-    <li className="flex items-center gap-3 py-3">
+    <li className="flex items-center gap-3 py-3.5">
+      <span
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-sm font-semibold"
+        style={{
+          background: slot ? `color-mix(in srgb, var(--series-${slot}) 14%, transparent)` : "color-mix(in srgb, var(--loss) 12%, transparent)",
+          color: slot ? `var(--series-${slot})` : "var(--loss-text)",
+        }}
+        aria-hidden
+      >
+        {(a.institution || a.name).trim().charAt(0).toUpperCase()}
+      </span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-          <Link href={`/accounts/${a.id}`} className="min-w-0 font-medium break-words hover:underline">
+          <Link href={`/accounts/${a.id}`} className="min-w-0 font-medium break-words hover:text-accent">
             {a.name}
           </Link>
           {partial && <Badge>{+a.ownershipPct.toFixed(2)}%</Badge>}

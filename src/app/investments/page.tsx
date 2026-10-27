@@ -8,7 +8,8 @@ import { ensureFreshPrices } from "@/server/services/prices";
 import { today } from "@/server/services/settings";
 import { serverFormat } from "@/server/format";
 import { ACCOUNT_TYPES, COMMON_CURRENCIES, HOLDING_ACCOUNT_TYPES } from "@/lib/domain";
-import { Badge, ButtonLink, Card, CardHeader, Delta, EmptyState, PageHeader, SeriesDot, Stat } from "@/components/ui";
+import { Badge, ButtonLink, Card, CardHeader, Delta, EmptyState, PageHeader, SeriesDot, Stat, ViewTabs } from "@/components/ui";
+import { INVESTMENT_TABS } from "@/components/investments-model";
 import { AllocationDonut } from "@/components/charts";
 import { ConfirmButton } from "@/components/accounts-ui";
 import { HoldingForm, type HoldingAccountOption } from "@/components/investments-form";
@@ -105,14 +106,7 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
       actions={
         summary.rows.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
-            <nav className="inline-flex gap-0.5 rounded-lg bg-surface-2 p-0.5 text-sm" aria-label="Investments views">
-              <span className="rounded-md bg-surface px-3 py-1 font-medium text-ink shadow-sm" aria-current="page">
-                Holdings
-              </span>
-              <Link href="/investments/analytics" className="rounded-md px-3 py-1 text-ink-2 hover:text-ink">
-                Analytics
-              </Link>
-            </nav>
+            <ViewTabs label="Investments views" current="/investments" tabs={INVESTMENT_TABS} />
             {!adding && (
               <ButtonLink href={hrefFor(filter?.id ?? null, { add: 1 })} scroll={false} variant="primary">
                 <Plus size={15} /> Add holding
@@ -216,13 +210,13 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
       ) : (
         <>
           {/* Hero */}
-          <Card className="bg-hero p-6">
+          <Card className="bg-hero p-5 md:p-7">
             <div className="flex flex-wrap items-start justify-between gap-6">
               <div className="min-w-0">
-                <div className="text-sm text-muted">
+                <div className="text-sm font-medium text-ink-2">
                   {filter ? `${filter.name} · ` : ""}Holdings value · {base}
                 </div>
-                <div className="tabular mt-1 text-4xl font-semibold tracking-tight sm:text-5xl">
+                <div className="display-xl tabular mt-2">
                   {f.money(s.totalCents, { whole: true })}
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -285,7 +279,7 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
             </div>
           </Card>
 
-          <div className="grid gap-5 lg:grid-cols-5">
+          <div className="grid gap-5 md:gap-6 lg:grid-cols-5">
             {/* Allocation by type */}
             <Card className="lg:col-span-3">
               <CardHeader title="Allocation" subtitle={`By type, in ${base}`} />

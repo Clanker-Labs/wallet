@@ -82,7 +82,7 @@ export function NetWorthPanel({ daily, monthly }: { daily: Point[]; monthly: Poi
         </div>
       </div>
       {mode === "value" ? (
-        <NetWorthChart points={points} dayTicks={range === "1m" || range === "3m"} />
+        <NetWorthChart points={points} height={300} dayTicks={range === "1m" || range === "3m"} />
       ) : daysView && changes.length ? (
         <>
           <DailyChangeChart points={changes} />
@@ -143,27 +143,30 @@ export function MoversCard({ moves }: { moves: MoveView[] }) {
       {shown.length === 0 ? (
         <p className="text-sm text-ink-2">Nothing moved over this period.</p>
       ) : (
-        <ul className="space-y-2.5">
+        <ul className="space-y-3.5">
           {shown.map((m) => {
             const D = DRIVER[m.driver];
             const w = (Math.abs(m.deltaCents) / max) * 50;
             return (
               <li key={m.accountId} className="text-sm">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <Link href={`/accounts/${m.accountId}`} className="flex min-w-0 items-center gap-1.5 text-ink-2 hover:text-ink">
-                    <D.icon size={13} className="shrink-0 text-muted" aria-label={D.text} />
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <Link href={`/accounts/${m.accountId}`} className="flex min-w-0 items-center gap-2 font-medium text-ink hover:text-accent">
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-surface-2 text-muted">
+                      <D.icon size={13} aria-label={D.text} />
+                    </span>
                     <span className="truncate">{m.name}</span>
-                    <span className="hidden shrink-0 text-xs text-muted sm:inline">· {D.text}</span>
+                    <span className="hidden shrink-0 text-xs font-normal text-muted sm:inline">{D.text}</span>
                   </Link>
                   <span className={`tabular shrink-0 font-medium ${m.deltaCents >= 0 ? "text-good-text" : "text-critical-text"}`}>
                     {f.money(m.deltaCents, { whole: true, signed: true })}
                   </span>
                 </div>
-                <div className="relative h-1.5 rounded-full bg-surface-2">
+                <div className="relative ml-8 h-1.5 rounded-full bg-surface-2">
                   <div className="absolute top-0 left-1/2 h-full w-px bg-[var(--border-strong)]" aria-hidden />
                   <div
-                    className="absolute top-0 h-full rounded-full"
+                    className="animate-grow absolute top-0 h-full rounded-full"
                     style={{
+                      transformOrigin: m.deltaCents >= 0 ? "left" : "right",
                       width: `${w}%`,
                       left: m.deltaCents >= 0 ? "50%" : `${50 - w}%`,
                       background: m.deltaCents >= 0 ? "var(--good)" : "var(--critical)",

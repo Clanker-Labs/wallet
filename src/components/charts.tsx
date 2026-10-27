@@ -18,6 +18,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useId } from "react";
 import { DateTime } from "luxon";
 import { useFormat } from "./format";
 
@@ -98,6 +99,7 @@ export function NetWorthChart({
   dayTicks?: boolean;
 }) {
   const f = useFormat();
+  const fillId = `nw-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const data = points.map((p) => ({ date: p.date, net: p.netCents / 100 }));
   // A flat series (e.g. a single balance) would get identical ticks: pad the axis around it.
   const values = data.map((d) => d.net);
@@ -110,7 +112,13 @@ export function NetWorthChart({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-        <CartesianGrid vertical={false} stroke="var(--grid)" />
+        <defs>
+          <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--series-1)" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="var(--series-1)" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid vertical={false} stroke="var(--grid)" strokeDasharray="3 4" />
         <XAxis dataKey="date" {...AXIS} tickFormatter={dayTicks ? shortDay : shortMonth} minTickGap={24} />
         <YAxis
           {...AXIS}
@@ -134,10 +142,9 @@ export function NetWorthChart({
           type="monotone"
           dataKey="net"
           stroke="var(--series-1)"
-          strokeWidth={2}
-          fill="var(--series-1)"
-          fillOpacity={0.1}
-          activeDot={{ r: 4, stroke: "var(--surface)", strokeWidth: 2 }}
+          strokeWidth={2.25}
+          fill={`url(#${fillId})`}
+          activeDot={{ r: 5, stroke: "var(--surface)", strokeWidth: 2.5 }}
           {...motion()}
         />
       </AreaChart>

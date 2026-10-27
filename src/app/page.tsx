@@ -88,17 +88,6 @@ export default async function Dashboard() {
             <div className="display-xl tabular mt-2 truncate">
               <CountUp cents={nw.netCents} opts={{ whole: true }} />
             </div>
-            <div className="-mx-1 mt-4 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
-              {moves.map((c) => (
-                <span key={c.label} className="inline-flex shrink-0 items-center gap-2 rounded-full border border-border bg-surface/70 py-1 pr-1 pl-3 text-xs backdrop-blur">
-                  <span className="font-medium text-muted">{c.label}</span>
-                  <Delta value={c.deltaCents} pill>
-                    {f.money(c.deltaCents, { whole: true, signed: true, compact: Math.abs(c.deltaCents) >= 100_000_00 })}
-                    {c.deltaPct !== null && <span className="font-medium opacity-80"> {c.deltaPct >= 0 ? "+" : ""}{c.deltaPct.toFixed(1)}%</span>}
-                  </Delta>
-                </span>
-              ))}
-            </div>
           </div>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4 xl:gap-x-10">
             {heroStats.map((st) => (
@@ -113,6 +102,17 @@ export default async function Dashboard() {
               </div>
             ))}
           </dl>
+        </div>
+        <div className="-mx-1 mt-5 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] md:flex-wrap md:overflow-visible">
+          {moves.map((c) => (
+            <span key={c.label} className="inline-flex shrink-0 items-center gap-2 rounded-full border border-border bg-surface/70 py-1 pr-1 pl-3 text-xs backdrop-blur">
+              <span className="font-medium text-muted">{c.label}</span>
+              <Delta value={c.deltaCents} pill>
+                {f.money(c.deltaCents, { whole: true, signed: true, compact: Math.abs(c.deltaCents) >= 100_000_00 })}
+                {c.deltaPct !== null && <span className="font-medium opacity-80"> {c.deltaPct >= 0 ? "+" : ""}{c.deltaPct.toFixed(1)}%</span>}
+              </Delta>
+            </span>
+          ))}
         </div>
         <div className="mt-6 md:mt-8">
           <NetWorthPanel

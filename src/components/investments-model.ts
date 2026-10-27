@@ -213,4 +213,5 @@ export function relativeDay(date: string, today: string, locale = "en-GB"): stri
 export const INVESTMENT_TABS = [
   { href: "/investments", label: "Holdings" },
   { href: "/investments/analytics", label: "Analytics" },
+  { href: "/investments/activity", label: "Activity" },
 ];

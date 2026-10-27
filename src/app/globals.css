@@ -304,19 +304,19 @@ body {
 }
 /* Rail: icons only. Which pieces show is decided here alone (no display utilities on them). */
 @layer components {
-  .nav-rail-only,
-  .nav-expand,
-  .nav-collapse {
+  .sidebar .nav-rail-only,
+  .sidebar .nav-expand,
+  .sidebar .nav-collapse {
     display: none;
   }
   .sidebar .nav-label {
     display: inline;
   }
   @media (min-width: 1024px) {
-    :root:not([data-nav="rail"]) .nav-collapse {
+    :root:not([data-nav="rail"]) .sidebar .nav-collapse {
       display: grid;
     }
-    :root[data-nav="rail"] .nav-expand {
+    :root[data-nav="rail"] .sidebar .nav-expand {
       display: grid;
     }
   }
@@ -763,4 +763,9 @@ html {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 6px;
+}
+
+/* The palette's search field is the dialog's whole point: no focus ring around it. */
+.palette input:focus-visible {
+  outline: none;
 }

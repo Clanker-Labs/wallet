@@ -204,3 +204,15 @@ export async function refreshPricesAction(): Promise<RefreshResult> {
     failed: r.failed.filter((f) => mine.has(f.symbol)).map((f) => ({ symbol: f.symbol, error: friendlyPriceError(f.error) })),
   };
 }
+
+/** Re-import a connection's whole broker history in the background; the page shows "importing…" until it lands. */
+export async function importHistoryAction(formData: FormData) {
+  const uid = await requireUid();
+  const id = Number(formData.get("connectionId"));
+  if (!Number.isInteger(id) || id <= 0) return;
+  const { syncBrokerHistory } = await import("@/server/services/broker-history");
+  // Paced at the broker's rate limit, so a full import takes a minute or two: never block the request on it.
+  // It marks itself running synchronously, so the re-render below already shows it.
+  void syncBrokerHistory(uid, id, { full: true }).catch((e) => console.warn(`[history] import ${id}: ${e instanceof Error ? e.message : e}`));
+  revalidatePath("/investments/activity");
+}

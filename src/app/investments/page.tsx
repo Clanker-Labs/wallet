@@ -3,6 +3,7 @@ import Link from "next/link";
 import { after } from "next/server";
 import { Bot, Pencil, Plus, X } from "lucide-react";
 import { holdingsSummary, type HoldingRow } from "@/server/services/holdings";
+import { contributionSeries } from "@/server/services/broker-history";
 import { listAccounts, type AccountWithBalance } from "@/server/services/accounts";
 import { ensureFreshPrices } from "@/server/services/prices";
 import { today } from "@/server/services/settings";
@@ -10,7 +11,7 @@ import { serverFormat } from "@/server/format";
 import { ACCOUNT_TYPES, COMMON_CURRENCIES, HOLDING_ACCOUNT_TYPES } from "@/lib/domain";
 import { Badge, ButtonLink, Card, CardHeader, Delta, EmptyState, PageHeader, SeriesDot, Stat, ViewTabs } from "@/components/ui";
 import { INVESTMENT_TABS } from "@/components/investments-model";
-import { AllocationDonut } from "@/components/charts";
+import { AllocationDonut, ContributionChart } from "@/components/charts";
 import { ConfirmButton } from "@/components/accounts-ui";
 import { HoldingForm, type HoldingAccountOption } from "@/components/investments-form";
 import { PriceRefresh } from "@/components/investments-ui";
@@ -169,9 +170,12 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
   }));
   const symbolCount = new Set(rows.filter((r) => r.symbol).map((r) => r.symbol)).size;
   const missingFx = summary.missingFx.filter((c) => rows.some((r) => r.currency === c) || c === base);
+  // Accounts with imported broker history: what you put in against what it is worth, day by day.
+  const contrib = filter ? null : contributionSeries(uid, { days: 365 });
+  const contribPoints = contrib ? contrib.points.slice(contrib.points.findIndex((p) => p.valueCents > 0 || p.depositedCents > 0)) : [];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 md:space-y-6">
       {header}
 
       {heldIn.length > 1 && (
@@ -278,6 +282,37 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
               </PriceRefresh>
             </div>
           </Card>
+
+          {contrib && contribPoints.length > 1 && (
+            <Card>
+              <CardHeader
+                title="Money in vs worth"
+                subtitle="Your brokerage accounts with imported history: deposits less withdrawals, against their value"
+                action={
+                  <ButtonLink href="/investments/activity" size="sm" variant="ghost">
+                    Activity
+                  </ButtonLink>
+                }
+              />
+              <div className="mb-5 grid grid-cols-3 gap-4 rounded-xl bg-surface-2/50 p-4">
+                <Stat label="Money in" value={f.money(contrib.depositedCents, { whole: true })} />
+                <Stat label="Worth" value={f.money(contrib.valueCents, { whole: true })} />
+                <Stat
+                  label="Gain"
+                  value={<span className={contrib.gainCents < 0 ? "text-critical-text" : contrib.gainCents > 0 ? "text-good-text" : ""}>{f.money(contrib.gainCents, { whole: true, signed: true })}</span>}
+                  delta={
+                    contrib.depositedCents > 0 && (
+                      <span className="text-muted">
+                        {contrib.gainCents >= 0 ? "+" : ""}
+                        {((contrib.gainCents / contrib.depositedCents) * 100).toFixed(1)}% on money in
+                      </span>
+                    )
+                  }
+                />
+              </div>
+              <ContributionChart points={contribPoints} />
+            </Card>
+          )}
 
           <div className="grid gap-5 md:gap-6 lg:grid-cols-5">
             {/* Allocation by type */}

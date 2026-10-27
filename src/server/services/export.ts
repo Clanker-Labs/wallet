@@ -12,6 +12,7 @@ const EXPORT_TABLES = [
   "accounts",
   "balance_snapshots",
   "holdings",
+  "broker_activity",
   "recurring",
   "transactions",
   "transaction_splits",
@@ -108,6 +109,10 @@ export function importExport(uid: string, data: unknown): Record<string, number>
       for (const r of rows("holdings")) {
         const a = m(maps.accounts, r.account_id);
         if (a) (insert("holdings", { ...r, user_id: uid, account_id: a, connection_id: null, external_id: null }), count("holdings"));
+      }
+      for (const r of rows("broker_activity")) {
+        const a = m(maps.accounts, r.account_id);
+        if (a) (insert("broker_activity", { ...r, user_id: uid, account_id: a, connection_id: null }), count("broker_activity"));
       }
       for (const r of rows("recurring")) {
         maps.recurring.set(Number(r.id), insert("recurring", { ...r, user_id: uid, account_id: m(maps.accounts, r.account_id), category_id: m(maps.categories, r.category_id) }));

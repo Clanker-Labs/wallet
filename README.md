@@ -29,11 +29,13 @@ Self-hosted · one SQLite file · passkey sign-in · MIT</p>
 - **Any currency.** USD by default. Every account, holding and transaction keeps its own currency, converted daily with free exchange rates.
 - **Investments.** Stocks, ETFs, funds, crypto and commodities with daily prices and gains. Physical gold takes a manual price.
 - **Brokerage sync.** Connect Trading 212 with a read-only API key: positions, average prices and cash are mirrored hourly. wallet never places an order.
+- **Brokerage history.** With the key's History permissions, past fills, dividends, deposits, withdrawals and interest are imported (twice a day, at Trading 212's pace) and the account's value is rebuilt for every day back to the first one — anchored on today's positions and cash, valued at market closes or the broker's own fill prices. That gives a true time-weighted return (deposits taken out), a money-weighted return (XIRR), money in vs worth, and dividends, interest and realised gains by month.
 - **Budgets.** Monthly envelopes with a pace marker, savings rate and cash flow.
 - **Drop a statement, it's imported.** CSV, PDF or a screenshot, anywhere in the app or sent to the Telegram bot. The assistant runs on the Claude API, or on your local `claude` / `codex` login.
-- **MCP & API.** The same 64 tools for Claude Code, Codex, Claude Desktop or plain HTTP. No token needed on localhost.
+- **MCP & API.** The same 67 tools for Claude Code, Codex, Claude Desktop or plain HTTP. No token needed on localhost.
 - **Telegram reminders** re-send until you tap ✅. `/update` asks for one balance at a time.
 - **Simulations** for mortgages, borrowing capacity, buy vs rent, and a net-worth projection.
+- **Fast to get around.** ⌘K (or `/`) opens a command palette to jump to any page or account or start an action; the sidebar folds to an icon rail; phones get a bottom tab bar. Pages use the whole screen and scale up on large monitors.
 - **Passkeys only.** Face ID on your iPhone through a QR code; no passwords, no OAuth. Several users per install, each with private data.
 
 Every feature has a short video on the [docs site](https://clanker-labs.github.io/wallet/).

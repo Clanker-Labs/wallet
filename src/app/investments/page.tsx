@@ -3,13 +3,15 @@ import Link from "next/link";
 import { after } from "next/server";
 import { Bot, Pencil, Plus, X } from "lucide-react";
 import { holdingsSummary, type HoldingRow } from "@/server/services/holdings";
+import { contributionSeries } from "@/server/services/broker-history";
 import { listAccounts, type AccountWithBalance } from "@/server/services/accounts";
 import { ensureFreshPrices } from "@/server/services/prices";
 import { today } from "@/server/services/settings";
 import { serverFormat } from "@/server/format";
 import { ACCOUNT_TYPES, COMMON_CURRENCIES, HOLDING_ACCOUNT_TYPES } from "@/lib/domain";
-import { Badge, ButtonLink, Card, CardHeader, Delta, EmptyState, PageHeader, SeriesDot, Stat } from "@/components/ui";
-import { AllocationDonut } from "@/components/charts";
+import { Badge, ButtonLink, Card, CardHeader, Delta, EmptyState, PageHeader, SeriesDot, Stat, ViewTabs } from "@/components/ui";
+import { INVESTMENT_TABS } from "@/components/investments-model";
+import { AllocationDonut, ContributionChart } from "@/components/charts";
 import { ConfirmButton } from "@/components/accounts-ui";
 import { HoldingForm, type HoldingAccountOption } from "@/components/investments-form";
 import { PriceRefresh } from "@/components/investments-ui";
@@ -105,14 +107,7 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
       actions={
         summary.rows.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
-            <nav className="inline-flex gap-0.5 rounded-lg bg-surface-2 p-0.5 text-sm" aria-label="Investments views">
-              <span className="rounded-md bg-surface px-3 py-1 font-medium text-ink shadow-sm" aria-current="page">
-                Holdings
-              </span>
-              <Link href="/investments/analytics" className="rounded-md px-3 py-1 text-ink-2 hover:text-ink">
-                Analytics
-              </Link>
-            </nav>
+            <ViewTabs label="Investments views" current="/investments" tabs={INVESTMENT_TABS} />
             {!adding && (
               <ButtonLink href={hrefFor(filter?.id ?? null, { add: 1 })} scroll={false} variant="primary">
                 <Plus size={15} /> Add holding
@@ -175,9 +170,12 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
   }));
   const symbolCount = new Set(rows.filter((r) => r.symbol).map((r) => r.symbol)).size;
   const missingFx = summary.missingFx.filter((c) => rows.some((r) => r.currency === c) || c === base);
+  // Accounts with imported broker history: what you put in against what it is worth, day by day.
+  const contrib = filter ? null : contributionSeries(uid, { days: 365 });
+  const contribPoints = contrib ? contrib.points.slice(contrib.points.findIndex((p) => p.valueCents > 0 || p.depositedCents > 0)) : [];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 md:space-y-6">
       {header}
 
       {heldIn.length > 1 && (
@@ -216,13 +214,13 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
       ) : (
         <>
           {/* Hero */}
-          <Card className="bg-hero p-6">
+          <Card className="bg-hero p-5 md:p-7">
             <div className="flex flex-wrap items-start justify-between gap-6">
               <div className="min-w-0">
-                <div className="text-sm text-muted">
+                <div className="text-sm font-medium text-ink-2">
                   {filter ? `${filter.name} · ` : ""}Holdings value · {base}
                 </div>
-                <div className="tabular mt-1 text-4xl font-semibold tracking-tight sm:text-5xl">
+                <div className="display-xl tabular mt-2">
                   {f.money(s.totalCents, { whole: true })}
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -285,7 +283,38 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
             </div>
           </Card>
 
-          <div className="grid gap-5 lg:grid-cols-5">
+          {contrib && contribPoints.length > 1 && (
+            <Card>
+              <CardHeader
+                title="Money in vs worth"
+                subtitle="Your brokerage accounts with imported history: deposits less withdrawals, against their value"
+                action={
+                  <ButtonLink href="/investments/activity" size="sm" variant="ghost">
+                    Activity
+                  </ButtonLink>
+                }
+              />
+              <div className="mb-5 grid grid-cols-3 gap-4 rounded-xl bg-surface-2/50 p-4">
+                <Stat label="Money in" value={f.money(contrib.depositedCents, { whole: true })} />
+                <Stat label="Worth" value={f.money(contrib.valueCents, { whole: true })} />
+                <Stat
+                  label="Gain"
+                  value={<span className={contrib.gainCents < 0 ? "text-critical-text" : contrib.gainCents > 0 ? "text-good-text" : ""}>{f.money(contrib.gainCents, { whole: true, signed: true })}</span>}
+                  delta={
+                    contrib.depositedCents > 0 && (
+                      <span className="text-muted">
+                        {contrib.gainCents >= 0 ? "+" : ""}
+                        {((contrib.gainCents / contrib.depositedCents) * 100).toFixed(1)}% on money in
+                      </span>
+                    )
+                  }
+                />
+              </div>
+              <ContributionChart points={contribPoints} />
+            </Card>
+          )}
+
+          <div className="grid gap-5 md:gap-6 lg:grid-cols-5">
             {/* Allocation by type */}
             <Card className="lg:col-span-3">
               <CardHeader title="Allocation" subtitle={`By type, in ${base}`} />

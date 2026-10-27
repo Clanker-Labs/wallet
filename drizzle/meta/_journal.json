@@ -78,6 +78,13 @@
       "when": 1793110586378,
       "tag": "0010_sharing_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793124321247,
+      "tag": "0011_broker_history",
+      "breakpoints": true
     }
   ]
 }

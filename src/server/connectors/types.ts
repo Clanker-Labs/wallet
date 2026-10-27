@@ -45,6 +45,47 @@ export interface BrokerSnapshot {
   warnings: string[];
 }
 
+export type BrokerActivityKind = "trade" | "dividend" | "deposit" | "withdrawal" | "interest" | "fee" | "other";
+
+/** One past event at the broker: a fill, a dividend, a deposit… */
+export interface BrokerActivity {
+  kind: BrokerActivityKind;
+  /** The broker's id for the event (fill id, dividend or transaction reference). */
+  externalId: string;
+  /** ISO timestamp. */
+  at: string;
+  ticker: string | null;
+  symbol: string | null;
+  name: string | null;
+  /** Trades only: units, negative for a sale. */
+  quantity: number | null;
+  /** Trades only: price per unit in `priceCurrency` (major unit). */
+  price: number | null;
+  priceCurrency: string | null;
+  /** Signed effect on the account's cash, in `currency` (a buy is negative). */
+  cash: number;
+  currency: string;
+  /** Realised profit or loss of a sale, in `currency`. */
+  realized: number | null;
+}
+
+export interface BrokerHistory {
+  activities: BrokerActivity[];
+  /** True when paging stopped early (rate limit, error): the rest comes next time. */
+  incomplete: boolean;
+  warnings: string[];
+}
+
+export interface FetchHistoryInput {
+  credentials: Record<string, string>;
+  environment: string;
+  fetchImpl?: FetchLike;
+  /** Already stored? Paging an endpoint stops at the first page made only of known events. */
+  isKnown?: (kind: BrokerActivityKind, externalId: string) => boolean;
+  /** Pause between two requests to the same endpoint (injectable for tests). */
+  sleep?: (ms: number) => Promise<void>;
+}
+
 export interface BrokerConnector {
   id: string;
   name: string;
@@ -60,6 +101,8 @@ export interface BrokerConnector {
     environment: string;
     fetchImpl?: FetchLike;
   }): Promise<BrokerSnapshot>;
+  /** Past trades, dividends and cash movements, newest first. Optional: not every broker exposes them. */
+  fetchHistory?(input: FetchHistoryInput): Promise<BrokerHistory>;
 }
 
 /** A failure worth showing to the user as-is (bad key, missing scope, rate limit). */

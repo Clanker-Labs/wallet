@@ -18,6 +18,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useId } from "react";
 import { DateTime } from "luxon";
 import { useFormat } from "./format";
 
@@ -45,7 +46,7 @@ interface TooltipRow {
 
 function TooltipBox({ title, rows }: { title: string; rows: TooltipRow[] }) {
   return (
-    <div className="rounded-lg border border-border bg-surface px-3 py-2 text-xs shadow-lg">
+    <div className="rounded-xl border border-border bg-surface/95 px-3 py-2 text-xs shadow-pop backdrop-blur">
       <div className="mb-1 text-muted">{title}</div>
       {rows.map((r) => (
         <div key={r.label} className="flex items-center gap-2 py-0.5">
@@ -80,6 +81,13 @@ export function Legend({ items }: { items: { label: string; color: string; kind?
 }
 
 const shortMonth = (iso: string) => DateTime.fromISO(iso).toFormat("LLL yy");
+
+/** Daily data labelled by month: one tick on the first point of each month (thinned to ≤ 12), never "Jan, Jan, Jan". */
+function monthTicks(dates: string[]): string[] {
+  const firsts = dates.filter((d, i) => i === 0 || d.slice(0, 7) !== dates[i - 1].slice(0, 7));
+  const step = Math.ceil(firsts.length / 12);
+  return firsts.filter((_, i) => i % step === 0);
+}
 const shortDay = (iso: string) => DateTime.fromISO(iso).toFormat("d LLL");
 
 // ── Net worth over time ──────────────────────────────────────────────────
@@ -98,6 +106,7 @@ export function NetWorthChart({
   dayTicks?: boolean;
 }) {
   const f = useFormat();
+  const fillId = `nw-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const data = points.map((p) => ({ date: p.date, net: p.netCents / 100 }));
   // A flat series (e.g. a single balance) would get identical ticks: pad the axis around it.
   const values = data.map((d) => d.net);
@@ -110,8 +119,14 @@ export function NetWorthChart({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-        <CartesianGrid vertical={false} stroke="var(--grid)" />
-        <XAxis dataKey="date" {...AXIS} tickFormatter={dayTicks ? shortDay : shortMonth} minTickGap={24} />
+        <defs>
+          <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--series-1)" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="var(--series-1)" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid vertical={false} stroke="var(--grid)" strokeDasharray="3 4" />
+        <XAxis dataKey="date" {...AXIS} tickFormatter={dayTicks ? shortDay : shortMonth} minTickGap={24} ticks={dayTicks ? undefined : monthTicks(data.map((d) => d.date))} />
         <YAxis
           {...AXIS}
           axisLine={false}
@@ -134,10 +149,9 @@ export function NetWorthChart({
           type="monotone"
           dataKey="net"
           stroke="var(--series-1)"
-          strokeWidth={2}
-          fill="var(--series-1)"
-          fillOpacity={0.1}
-          activeDot={{ r: 4, stroke: "var(--surface)", strokeWidth: 2 }}
+          strokeWidth={2.25}
+          fill={`url(#${fillId})`}
+          activeDot={{ r: 5, stroke: "var(--surface)", strokeWidth: 2.5 }}
           {...motion()}
         />
       </AreaChart>
@@ -536,7 +550,7 @@ export function AccrualChart({
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} stroke="var(--grid)" />
-          <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={32} />
+          <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={32} ticks={monthTicks(points.map((p) => p.date))} />
           <YAxis {...AXIS} axisLine={false} width={64} tickFormatter={(v) => fmt(v, true)} />
           <Tooltip
             cursor={{ stroke: "var(--axis)", strokeWidth: 1 }}
@@ -569,7 +583,7 @@ export function IndexChart({ points, height = 240 }: { points: { date: string; v
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
         <CartesianGrid vertical={false} stroke="var(--grid)" />
-        <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={32} />
+        <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={32} ticks={monthTicks(points.map((p) => p.date))} />
         <YAxis {...AXIS} axisLine={false} width={48} domain={["auto", "auto"]} tickFormatter={(v) => `${v - 100 >= 0 ? "+" : ""}${Math.round(v - 100)}%`} />
         <ReferenceLine y={100} stroke="var(--axis)" strokeDasharray="3 3" />
         <Tooltip
@@ -594,7 +608,7 @@ export function DrawdownChart({ points, height = 140 }: { points: { date: string
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={points} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
         <CartesianGrid vertical={false} stroke="var(--grid)" />
-        <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={32} />
+        <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={32} ticks={monthTicks(points.map((p) => p.date))} />
         <YAxis {...AXIS} axisLine={false} width={48} domain={["dataMin", 0]} tickFormatter={(v) => `${Math.round(v)}%`} />
         <Tooltip
           cursor={{ stroke: "var(--axis)", strokeWidth: 1 }}
@@ -669,6 +683,98 @@ export function MonthlyReturns({ months }: { months: { month: string; pct: numbe
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ── Money in vs worth (broker history) ────────────────────────────────────
+
+/** What the portfolio is worth each day against the money put in so far (step line). */
+export function ContributionChart({ points, height = 260 }: { points: { date: string; depositedCents: number; valueCents: number }[]; height?: number }) {
+  const f = useFormat();
+  const fillId = `contrib-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const data = points.map((p) => ({ date: p.date, worth: p.valueCents / 100, money: p.depositedCents / 100 }));
+  return (
+    <div>
+      <Legend
+        items={[
+          { label: "Worth", color: "var(--series-2)" },
+          { label: "Money in", color: "var(--muted)" },
+        ]}
+      />
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--series-2)" stopOpacity={0.26} />
+              <stop offset="100%" stopColor="var(--series-2)" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid vertical={false} stroke="var(--grid)" strokeDasharray="3 4" />
+          <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={28} ticks={monthTicks(data.map((d) => d.date))} />
+          <YAxis {...AXIS} axisLine={false} width={64} tickFormatter={(v) => f.units(v, { compact: true })} />
+          <Tooltip
+            cursor={{ stroke: "var(--axis)", strokeWidth: 1 }}
+            content={({ active, payload }) =>
+              active && payload?.length ? (
+                <TooltipBox
+                  title={DateTime.fromISO(String(payload[0].payload.date)).toFormat("d LLL yyyy")}
+                  rows={[
+                    { label: "Worth", value: f.units(Number(payload[0].payload.worth), { whole: true }), color: "var(--series-2)" },
+                    { label: "Money in", value: f.units(Number(payload[0].payload.money), { whole: true }), color: "var(--muted)" },
+                    {
+                      label: "Gain",
+                      value: f.units(Number(payload[0].payload.worth) - Number(payload[0].payload.money), { whole: true, signed: true }),
+                      color: "transparent",
+                    },
+                  ]}
+                />
+              ) : null
+            }
+          />
+          <Area type="monotone" dataKey="worth" stroke="var(--series-2)" strokeWidth={2.25} fill={`url(#${fillId})`} activeDot={{ r: 5, stroke: "var(--surface)", strokeWidth: 2.5 }} {...motion()} />
+          <Line type="stepAfter" dataKey="money" stroke="var(--muted)" strokeWidth={1.5} strokeDasharray="5 4" dot={false} activeDot={false} {...motion()} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/** Dividends and interest per month, stacked. */
+export function IncomeChart({ months, height = 220 }: { months: { month: string; dividendsCents: number; interestCents: number }[]; height?: number }) {
+  const f = useFormat();
+  const data = months.map((m) => ({ month: m.month, dividends: m.dividendsCents / 100, interest: m.interestCents / 100 }));
+  return (
+    <div>
+      <Legend
+        items={[
+          { label: "Dividends", color: "var(--series-2)", kind: "rect" },
+          { label: "Interest", color: "var(--series-5)", kind: "rect" },
+        ]}
+      />
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={data} margin={{ top: 12, right: 4, bottom: 0, left: 0 }} barCategoryGap="30%">
+          <CartesianGrid vertical={false} stroke="var(--grid)" strokeDasharray="3 4" />
+          <XAxis dataKey="month" {...AXIS} tickFormatter={(m) => DateTime.fromISO(`${m}-01`).toFormat("LLL")} />
+          <YAxis {...AXIS} axisLine={false} width={52} tickFormatter={(v) => f.units(v, { compact: true })} />
+          <Tooltip
+            cursor={{ fill: "var(--surface-2)" }}
+            content={({ active, payload, label }) =>
+              active && payload?.length ? (
+                <TooltipBox
+                  title={DateTime.fromISO(`${label}-01`).toFormat("LLLL yyyy")}
+                  rows={[
+                    { label: "Dividends", value: f.units(Number(payload[0].payload.dividends)), color: "var(--series-2)", kind: "rect" },
+                    { label: "Interest", value: f.units(Number(payload[0].payload.interest)), color: "var(--series-5)", kind: "rect" },
+                  ]}
+                />
+              ) : null
+            }
+          />
+          <Bar dataKey="dividends" stackId="i" fill="var(--series-2)" maxBarSize={22} {...motion()} />
+          <Bar dataKey="interest" stackId="i" fill="var(--series-5)" radius={[4, 4, 0, 0]} maxBarSize={22} {...motion()} />
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }

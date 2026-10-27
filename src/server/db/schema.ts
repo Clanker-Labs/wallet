@@ -205,9 +205,54 @@ export const brokerConnections = sqliteTable(
     lastSyncAt: integer("last_sync_at", { mode: "timestamp_ms" }),
     lastSyncOk: integer("last_sync_ok", { mode: "boolean" }),
     lastError: text("last_error"),
+    /** Last time past trades, dividends and cash movements were imported. */
+    historySyncedAt: integer("history_synced_at", { mode: "timestamp_ms" }),
+    /** null (never) · "running" · "ok" · "incomplete" (more next run) · an error to show. */
+    historyStatus: text("history_status"),
     createdAt: createdAt(),
   },
   (t) => [index("broker_connections_user").on(t.userId), uniqueIndex("broker_connections_account").on(t.accountId)],
+);
+
+export type BrokerActivityKind = "trade" | "dividend" | "deposit" | "withdrawal" | "interest" | "fee" | "other";
+
+/**
+ * What happened at a broker, imported from its history: fills, dividends,
+ * deposits, withdrawals, interest, fees. Rebuilds the account's past value
+ * (positions and cash on every day) and its money-in, income and realised gains.
+ */
+export const brokerActivity = sqliteTable(
+  "broker_activity",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: userId(),
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    connectionId: integer("connection_id").references(() => brokerConnections.id, { onDelete: "set null" }),
+    kind: text("kind").$type<BrokerActivityKind>().notNull(),
+    /** The broker's id for the event (fill id, reference). */
+    externalId: text("external_id").notNull(),
+    /** ISO timestamp as the broker gave it. */
+    at: text("at").notNull(),
+    /** Day in the user's time zone (YYYY-MM-DD). */
+    date: text("date").notNull(),
+    ticker: text("ticker"),
+    symbol: text("symbol"),
+    name: text("name"),
+    /** Trades: units, negative for a sale. */
+    quantity: real("quantity"),
+    /** Trades: price per unit, in `priceCurrency` (major unit). */
+    price: real("price"),
+    priceCurrency: text("price_currency"),
+    /** Signed effect on the account's cash, in the account currency (a buy is negative). */
+    cashCents: integer("cash_cents").notNull(),
+    currency: text("currency").notNull(),
+    /** Realised profit or loss of a sale, in the account currency. */
+    realizedCents: integer("realized_cents"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("broker_activity_external").on(t.accountId, t.kind, t.externalId), index("broker_activity_account_date").on(t.accountId, t.date)],
 );
 
 /** Daily closing prices per market symbol (shared by all users). */
@@ -615,3 +660,4 @@ export type Budget = typeof budgets.$inferSelect;
 export type Simulation = typeof simulations.$inferSelect;
 export type Upload = typeof uploads.$inferSelect;
 export type BrokerConnection = typeof brokerConnections.$inferSelect;
+export type BrokerActivityRow = typeof brokerActivity.$inferSelect;

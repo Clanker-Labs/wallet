@@ -7,6 +7,7 @@ import * as reminderSvc from "@/server/services/reminders";
 import * as holdingsSvc from "@/server/services/holdings";
 import * as uploadsSvc from "@/server/services/uploads";
 import * as connectionsSvc from "@/server/services/connections";
+import * as brokerHistorySvc from "@/server/services/broker-history";
 import { ensureFreshRates, fxConverter, latestFxDate } from "@/server/services/fx";
 import { refreshPrices, searchSymbols } from "@/server/services/prices";
 import { netWorthDaily, netWorthHistory, netWorthMoves, netWorthOn } from "@/server/services/networth";
@@ -67,7 +68,8 @@ const SQL_SCHEMA = `Tables (only your data; amounts are INTEGER cents in the row
 - budgets(id, category_id, amount_cents, currency) — monthly envelope; currency NULL = the base currency
 - reminders(id, title, message, kind, account_id, frequency, day_of_month, day_of_week, month_of_year, date, time_of_day, nag_every_hours, enabled, next_run_at [ms epoch])
 - recurring(id, name, pattern, account_id, category_id, amount_cents [signed], currency, cadence, next_date, status ['active','suggested','paused','dismissed'], last_matched_date, last_change_pct) — expected payments; transactions.recurring_id links the real ones
-- simulations(id, name, type, params JSON); settings(key, value) — key 'currency' = base currency`;
+- simulations(id, name, type, params JSON); settings(key, value) — key 'currency' = base currency
+- broker_activity(id, account_id, kind ['trade','dividend','deposit','withdrawal','interest','fee','other'], external_id, at [ISO timestamp], date, ticker, symbol, name, quantity REAL [trades; negative = sale], price REAL [per unit, price_currency], price_currency, cash_cents [signed effect on the account's cash, account currency; a buy is negative], currency, realized_cents [realised P/L of a sale]) — imported broker history`;
 
 const csvMappingSchema = z.object({
   date: z.string().describe("Header of the date column"),
@@ -240,6 +242,36 @@ export const TOOLS = [
     input: z.object({}),
     readOnly: true,
     run: (_i, { userId }) => connectionsSvc.listConnections(userId),
+  }),
+  tool({
+    name: "list_investment_activity",
+    title: "Investment activity",
+    description:
+      "Past trades, dividends, deposits, withdrawals, interest and fees imported from connected brokerages (e.g. Trading 212), newest first, with totals of the whole filtered set in the base currency (bought, sold, dividends, interest, deposited, withdrawn, fees, realised P/L). Amounts are in the account currency; cashCents is the signed effect on the account's cash (a buy is negative).",
+    input: z.object({
+      accountId: z.number().int().optional(),
+      kind: z.enum(["trade", "dividend", "deposit", "withdrawal", "interest", "fee", "other"]).optional(),
+      ticker: z.string().optional().describe("Broker ticker (AAPL_US_EQ) or Yahoo symbol (AAPL)"),
+      limit: z.number().int().min(1).max(200).default(50),
+      offset: z.number().int().min(0).default(0),
+    }),
+    readOnly: true,
+    run: (i, { userId }) => brokerHistorySvc.investmentActivity(userId, i),
+  }),
+  tool({
+    name: "get_investment_income",
+    title: "Investment income",
+    description:
+      "Dividends, interest on cash and realised gains per month (base currency), with totals over the window and this year to date, from imported brokerage history. Also money put in vs what it is worth now, the time-weighted return (deposits taken out) and the annual money-weighted return (XIRR).",
+    input: z.object({ months: z.number().int().min(1).max(120).default(12) }),
+    readOnly: true,
+    run: ({ months }, { userId }) => {
+      const perf = brokerHistorySvc.brokerPerformance(userId, { days: 365 });
+      return {
+        ...brokerHistorySvc.investmentIncome(userId, { months }),
+        performance: perf && { ...perf, index: perf.index.filter((_, i) => i % 7 === 0 || i === perf.index.length - 1) },
+      };
+    },
   }),
   tool({
     name: "search_symbol",
@@ -707,7 +739,14 @@ export const TOOLS = [
     readOnly: true,
     run: ({ days }, { userId }) => {
       const a = investmentAnalytics(userId, { days });
-      return { ...a, index: a.index.filter((_, i) => i % 7 === 0 || i === a.index.length - 1), drawdown: undefined, actual: undefined, holdings: a.holdings.map(({ spark: _s, ...h }) => h) };
+      return {
+        ...a,
+        index: a.index.filter((_, i) => i % 7 === 0 || i === a.index.length - 1),
+        drawdown: undefined,
+        actual: undefined,
+        holdings: a.holdings.map(({ spark: _s, ...h }) => h),
+        broker: a.broker && { ...a.broker, index: undefined },
+      };
     },
   }),
   tool({
@@ -890,6 +929,21 @@ export const TOOLS = [
       const ids = connectionId ? [connectionId] : connectionsSvc.listConnections(userId).map((c) => c.id);
       const results = [];
       for (const id of ids) results.push(await connectionsSvc.syncConnection(userId, id, { force: true }));
+      invalidateSqlSandbox(userId);
+      return { results };
+    },
+  }),
+  tool({
+    name: "sync_broker_history",
+    title: "Import brokerage history",
+    description:
+      "Import past trades, dividends, deposits, withdrawals and interest from a connected brokerage now (normally twice a day), then rebuild the account's value for every past day from them. full: true re-reads the whole history instead of stopping at what is already imported. Read-only at the broker. A long history takes minutes at the broker's rate limit.",
+    input: z.object({ connectionId: z.number().int().optional(), full: z.boolean().default(false) }),
+    readOnly: false,
+    run: async ({ connectionId, full }, { userId }) => {
+      const ids = connectionId ? [connectionId] : connectionsSvc.listConnections(userId).map((c) => c.id);
+      const results = [];
+      for (const id of ids) results.push(await brokerHistorySvc.syncBrokerHistory(userId, id, { full }));
       invalidateSqlSandbox(userId);
       return { results };
     },

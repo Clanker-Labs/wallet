@@ -208,3 +208,10 @@ export function relativeDay(date: string, today: string, locale = "en-GB"): stri
   if (d < 7) return `${d} days ago`;
   return new Date(`${date}T00:00:00Z`).toLocaleDateString(locale, { day: "numeric", month: "short", timeZone: "UTC" });
 }
+
+/** The investments sub-pages, in tab order. */
+export const INVESTMENT_TABS = [
+  { href: "/investments", label: "Holdings" },
+  { href: "/investments/analytics", label: "Analytics" },
+  { href: "/investments/activity", label: "Activity" },
+];

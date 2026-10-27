@@ -83,7 +83,7 @@
 
   --glow: rgba(91, 79, 233, 0.16);
   --glow-2: rgba(139, 92, 246, 0.12);
-  --card-shadow: 0 1px 2px rgba(16, 24, 48, 0.04), 0 1px 3px rgba(16, 24, 48, 0.03);
+  --card-shadow: 0 1px 2px rgba(16, 24, 48, 0.04), 0 4px 16px -6px rgba(16, 24, 48, 0.06);
   --pop-shadow: 0 12px 32px -8px rgba(16, 24, 48, 0.16), 0 2px 6px rgba(16, 24, 48, 0.06);
 }
 
@@ -230,7 +230,8 @@
   --color-series-8: var(--series-8);
   --shadow-card: var(--card-shadow);
   --shadow-pop: var(--pop-shadow);
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 /* bg-brand-gradient, bg-hero (hero card), bg-auth (sign-in backdrop) */
@@ -252,6 +253,7 @@ body {
 
 body {
   font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -260,6 +262,284 @@ body {
 /* Numbers that line up in columns */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* Wide screens: the whole rem scale steps up, so text and controls fill the room instead of floating in it. */
+@media (min-width: 1536px) {
+  html {
+    font-size: 106.25%;
+  }
+}
+@media (min-width: 1920px) {
+  html {
+    font-size: 112.5%;
+  }
+}
+
+/* ── App shell ─────────────────────────────────────────────────────────────
+ * The sidebar is 16rem from lg, a 4.5rem icon rail on tablets, and the user
+ * can fold it to the rail on any desktop (data-nav="rail" on <html>, set
+ * before first paint). The body's left margin follows it.
+ */
+:root {
+  --nav-w: 0px;
+}
+@media (min-width: 768px) {
+  :root {
+    --nav-w: 4.5rem;
+  }
+}
+@media (min-width: 1024px) {
+  :root:not([data-nav="rail"]) {
+    --nav-w: 16rem;
+  }
+}
+.sidebar {
+  width: var(--nav-w);
+  transition: width 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.shell-body {
+  margin-left: var(--nav-w);
+  transition: margin-left 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+/* Rail: icons only. Which pieces show is decided here alone (no display utilities on them). */
+@layer components {
+  .sidebar .nav-rail-only,
+  .sidebar .nav-expand,
+  .sidebar .nav-collapse {
+    display: none;
+  }
+  .sidebar .nav-label {
+    display: inline;
+  }
+  @media (min-width: 1024px) {
+    :root:not([data-nav="rail"]) .sidebar .nav-collapse {
+      display: grid;
+    }
+    :root[data-nav="rail"] .sidebar .nav-expand {
+      display: grid;
+    }
+  }
+  @media (min-width: 768px) and (max-width: 1023.98px) {
+    .sidebar .nav-label,
+    .sidebar .nav-group-label {
+      display: none;
+    }
+    .sidebar .nav-rail-only {
+      display: inline-flex;
+    }
+    .sidebar .search-pill,
+    .sidebar .nav-link {
+      justify-content: center;
+      padding-inline: 0;
+    }
+  }
+  @media (min-width: 1024px) {
+    :root[data-nav="rail"] .sidebar .nav-label,
+    :root[data-nav="rail"] .sidebar .nav-group-label {
+      display: none;
+    }
+    :root[data-nav="rail"] .sidebar .nav-rail-only {
+      display: inline-flex;
+    }
+    :root[data-nav="rail"] .sidebar .search-pill,
+    :root[data-nav="rail"] .sidebar .nav-link {
+      justify-content: center;
+      padding-inline: 0;
+    }
+  }
+}
+
+@layer components {
+.nav-group-label {
+  padding: 0 0.75rem 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.nav-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  height: 2.25rem;
+  padding: 0 0.75rem;
+  border-radius: 0.625rem;
+  font-size: 0.875rem;
+  color: var(--text-2);
+  transition: background-color 0.15s, color 0.15s;
+}
+.nav-link svg {
+  color: var(--muted);
+  transition: color 0.15s;
+}
+.nav-link:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.nav-link:hover svg {
+  color: var(--text-2);
+}
+.nav-link-active,
+.nav-link-active:hover {
+  background: var(--brand-tint);
+  color: var(--text);
+  font-weight: 500;
+}
+.nav-link-active svg,
+.nav-link-active:hover svg {
+  color: var(--accent-text);
+}
+.nav-link-active::before {
+  content: "";
+  position: absolute;
+  left: -0.75rem;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--brand-gradient);
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.625rem;
+  color: var(--text-2);
+  transition: background-color 0.15s, color 0.15s;
+}
+.icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.search-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  height: 2.25rem;
+  padding: 0 0.6rem 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.8125rem;
+  transition: border-color 0.15s, box-shadow 0.15s, color 0.15s;
+}
+.search-pill:hover {
+  border-color: var(--border-strong);
+  color: var(--text-2);
+  box-shadow: var(--card-shadow);
+}
+.kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 0.375rem;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1;
+}
+.btn-new {
+  align-items: center;
+  gap: 0.35rem;
+  height: 2.25rem;
+  padding: 0 0.85rem;
+  border-radius: 0.75rem;
+  background: var(--brand-gradient);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset, 0 6px 16px -6px var(--glow);
+  transition: filter 0.15s, transform 0.15s;
+}
+.btn-new:hover {
+  filter: brightness(1.06);
+}
+.btn-new:active {
+  transform: translateY(1px);
+}
+
+/* Phone tab bar and its "More" sheet */
+.tabbar {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.5rem 0 0.4rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+.tab-active {
+  color: var(--accent-text);
+}
+.topbar {
+  padding-top: env(safe-area-inset-top);
+}
+
+}
+
+/* Hero numbers scale with the screen without overflowing a phone. */
+.display-xl {
+  font-size: clamp(2.25rem, 1.4rem + 3.6vw, 4.25rem);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  font-weight: 650;
+}
+.display-lg {
+  font-size: clamp(1.75rem, 1.3rem + 1.6vw, 2.5rem);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  font-weight: 650;
+}
+
+/* A card you can click: lifts a hair on hover. */
+.card-link {
+  transition: transform 0.18s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.18s, border-color 0.18s;
+}
+.card-link:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-strong);
+  box-shadow: var(--pop-shadow);
+}
+
+/* Change pill: tinted wash of the gain/loss colour behind the signed figure. */
+.pill-gain,
+.pill-loss,
+.pill-flat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+.pill-gain {
+  color: var(--gain-text);
+  background: color-mix(in srgb, var(--gain) 13%, transparent);
+}
+.pill-loss {
+  color: var(--loss-text);
+  background: color-mix(in srgb, var(--loss) 13%, transparent);
+}
+.pill-flat {
+  color: var(--text-2);
+  background: var(--surface-2);
 }
 
 @layer base {
@@ -430,6 +710,43 @@ html {
   .page-enter > * > :is(section, div):nth-child(5) { animation: rise 0.34s 0.18s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
   .page-enter > * > :is(section, div):nth-child(n + 6) { animation: rise 0.34s 0.22s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 }
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .palette {
+    animation: pop-in 0.16s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+  .palette-backdrop {
+    animation: fade-in 0.16s ease both;
+  }
+  .sheet {
+    animation: sheet-up 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -446,4 +763,9 @@ html {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 6px;
+}
+
+/* The palette's search field is the dialog's whole point: no focus ring around it. */
+.palette input:focus-visible {
+  outline: none;
 }

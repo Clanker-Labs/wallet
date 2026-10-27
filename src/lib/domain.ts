@@ -48,6 +48,7 @@ export const ACCOUNT_TYPES = {
   life_insurance: { label: "Life insurance (assurance-vie)", assetClass: "investments" },
   employee_savings: { label: "Employee savings (PEE)", assetClass: "investments" },
   retirement: { label: "Retirement (401k, IRA, PER…)", assetClass: "retirement" },
+  end_of_service: { label: "Job · end-of-service gratuity", assetClass: "retirement" },
   crypto: { label: "Crypto", assetClass: "crypto" },
   precious_metals: { label: "Precious metals & commodities", assetClass: "commodities" },
   real_estate: { label: "Real estate", assetClass: "real_estate" },

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import {
   Bell,
   Bot,
+  Briefcase,
   Calculator,
   CandlestickChart,
   LayoutDashboard,
@@ -27,6 +28,7 @@ const NAV = [
   { href: "/", label: "Net worth", icon: LayoutDashboard },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/investments", label: "Investments", icon: CandlestickChart },
+  { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/budgets", label: "Budgets", icon: PiggyBank },
   { href: "/transactions", label: "Transactions", icon: ReceiptText },
   { href: "/simulations", label: "Simulations", icon: Calculator },

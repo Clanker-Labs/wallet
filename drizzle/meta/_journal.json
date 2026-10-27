@@ -15,6 +15,13 @@
       "when": 1792306248936,
       "tag": "0001_broker_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793101954721,
+      "tag": "0002_job_gratuity",
+      "breakpoints": true
     }
   ]
 }

@@ -26,6 +26,7 @@ import {
   relativeDay,
 } from "@/components/investments-model";
 import { listHoldings } from "@/server/services/holdings";
+import { accrualSeries, getJob } from "@/server/services/jobs";
 import { NetWorthChart } from "@/components/charts";
 import { AccountForm } from "@/components/accounts-form";
 import { ConfirmButton, DeleteAccountForm, Disclosure, RecordBalanceForm } from "@/components/accounts-ui";
@@ -88,8 +89,11 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const currencies = [...new Set<string>([...COMMON_CURRENCIES, ...others.map((x) => x.currency), a.currency])];
 
   // Chart: snapshots as recorded, or a monthly series off the amortization schedule for loans.
+  const job = a.gratuityParams ? getJob(uid, a.id) : null;
   let points: { date: string; netCents: number }[];
-  if (loan) {
+  if (job) {
+    points = accrualSeries(job.params, t, 0).map((p) => ({ date: p.date, netCents: Math.round((p.accrued ?? 0) * 100) }));
+  } else if (loan) {
     const from = addDays(loan.startDate, -31);
     const dates = monthRange(from.slice(0, 7), addMonths(t.slice(0, 7), -1)).map(endOfMonth).filter((d) => d >= from);
     dates.push(t);
@@ -165,6 +169,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
             )}
             {a.derivedFromLoan
               ? "from the amortization schedule"
+              : a.derivedFromJob
+                ? "end-of-service gratuity accrued to date"
               : a.valuedByHoldings
                 ? `market value${a.lastUpdated ? `, prices as of ${formatDate(a.lastUpdated)}` : ""}`
                 : a.lastUpdated
@@ -203,7 +209,26 @@ export default async function AccountPage({ params, searchParams }: Props) {
       )}
 
       {/* Primary action */}
-      {loan && loanStats ? (
+      {job ? (
+        <Card>
+          <CardHeader
+            title="Job"
+            subtitle={`The balance is the end-of-service gratuity accrued under ${job.rule.law} — nothing to record.`}
+            action={
+              <ButtonLink href="/jobs" size="sm" variant="ghost">
+                Jobs <ArrowRight size={14} />
+              </ButtonLink>
+            }
+          />
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
+            <Stat label="Service" value={`${job.counted.years.toFixed(2)} years`} />
+            <Stat label="Monthly salary used" value={native(Math.round(job.counted.salary * 100), { whole: true })} />
+            <Stat label="If you resign" value={native(Math.round(job.now.resignation.amount * 100), { whole: true })} />
+            <Stat label="If let go" value={native(Math.round(job.now.termination.amount * 100), { whole: true })} />
+          </div>
+          <p className="mt-3 text-xs text-muted">{job.counted.formula}</p>
+        </Card>
+      ) : loan && loanStats ? (
         <Card>
           <CardHeader
             title="Loan"
@@ -365,14 +390,14 @@ export default async function AccountPage({ params, searchParams }: Props) {
         </Card>
       )}
 
-      {/* Edit */}
-      <Card className="py-3">
+      {/* Edit (a job's terms are edited on the Jobs page) */}
+      {!job && <Card className="py-3">
         <Disclosure summaryClassName="py-1" summary={<span className="text-sm font-semibold">Edit details</span>}>
           <div className="pt-4 pb-2">
             <AccountForm account={formValues} properties={properties} currencies={currencies} baseCurrency={f.currency} />
           </div>
         </Disclosure>
-      </Card>
+      </Card>}
 
       {/* Archive / delete */}
       <Card>

@@ -10,6 +10,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import type { AccountType, AssetClass, HoldingType, LoanParams } from "@/lib/domain";
+import type { GratuityParams } from "@/lib/finance/gratuity";
 
 const createdAt = () =>
   integer("created_at", { mode: "timestamp_ms" })
@@ -107,6 +108,8 @@ export const accounts = sqliteTable(
     linkedAccountId: integer("linked_account_id"),
     /** When set, the balance of a loan is derived from its amortization schedule. */
     loanParams: text("loan_params", { mode: "json" }).$type<LoanParams>(),
+    /** A job: the balance is the end-of-service gratuity accrued under its country's law. */
+    gratuityParams: text("gratuity_params", { mode: "json" }).$type<GratuityParams>(),
     notes: text("notes"),
     createdAt: createdAt(),
   },

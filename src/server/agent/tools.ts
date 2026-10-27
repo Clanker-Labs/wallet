@@ -9,7 +9,8 @@ import * as uploadsSvc from "@/server/services/uploads";
 import * as connectionsSvc from "@/server/services/connections";
 import { ensureFreshRates, fxConverter, latestFxDate } from "@/server/services/fx";
 import { refreshPrices, searchSymbols } from "@/server/services/prices";
-import { netWorthHistory, netWorthOn } from "@/server/services/networth";
+import { netWorthDaily, netWorthHistory, netWorthMoves, netWorthOn } from "@/server/services/networth";
+import * as jobsSvc from "@/server/services/jobs";
 import { getOverview } from "@/server/services/overview";
 import { getSettings, today } from "@/server/services/settings";
 import { purchaseInputSchema, simulatePurchase, capacityInputSchema, borrowingCapacity } from "@/lib/finance/mortgage";
@@ -46,7 +47,7 @@ const isoDate = z.string().refine(isISODate, "Expected YYYY-MM-DD");
 const month = z.string().refine(isMonth, "Expected YYYY-MM");
 
 const SQL_SCHEMA = `Tables (only your data; amounts are INTEGER cents in the row's currency; dates are TEXT 'YYYY-MM-DD'):
-- accounts(id, name, institution, type, asset_class ['cash','investments','retirement','real_estate','crypto','commodities','other','liabilities'], currency, ownership_pct, include_in_net_worth, archived_at, linked_account_id, loan_params JSON, notes)
+- accounts(id, name, institution, type, asset_class ['cash','investments','retirement','real_estate','crypto','commodities','other','liabilities'], currency, ownership_pct, include_in_net_worth, archived_at, linked_account_id, loan_params JSON, gratuity_params JSON [a job: country, startDate, endDate, salaries — its balance is the end-of-service gratuity, computed, never stored], notes)
 - balance_snapshots(id, account_id, date, balance_cents, note, source) — one row per account per day, in the account currency; liabilities store the amount owed as a positive number
 - holdings(id, account_id, symbol, name, asset_type, quantity REAL, currency, cost_basis REAL per unit, manual_price REAL, connection_id, external_id) — connection_id set = synced from a brokerage, overwritten by the next sync
 - prices(symbol, date, close REAL, currency) — daily closes of held symbols
@@ -93,10 +94,37 @@ export const TOOLS = [
   tool({
     name: "get_net_worth_history",
     title: "Net worth history",
-    description: "Month-end net worth (total and per asset class, base currency) for the last N months, plus today.",
-    input: z.object({ months: z.number().int().min(1).max(240).default(24) }),
+    description:
+      "Net worth over time (total and per asset class, base currency). granularity 'month' gives month-ends for the last N months plus today; 'day' gives every day for the last N days (investment accounts use their daily market snapshot).",
+    input: z.object({
+      granularity: z.enum(["month", "day"]).default("month"),
+      months: z.number().int().min(1).max(240).default(24).describe("For granularity 'month'"),
+      days: z.number().int().min(1).max(1830).default(90).describe("For granularity 'day'"),
+    }),
     readOnly: true,
-    run: ({ months }, { userId }) => netWorthHistory(userId, months),
+    run: ({ granularity, months, days }, { userId }) => (granularity === "day" ? netWorthDaily(userId, days) : netWorthHistory(userId, months)),
+  }),
+  tool({
+    name: "get_net_worth_moves",
+    title: "What moved net worth",
+    description:
+      "How net worth changed over 1 day, 1 week, 1 month, the year to date and 1 year (amount and %), with the accounts behind each change, biggest first. Each mover has a driver: 'balance' (a new balance was recorded), 'market' (prices of holdings), 'loan' (repayment schedule) or 'job' (end-of-service gratuity accruing) or 'fx' (same balance in its own currency, only the exchange rate moved). Movers add up to the change. Use it to answer 'why did my net worth go up/down'.",
+    input: z.object({ period: z.enum(["1d", "1w", "1m", "ytd", "1y"]).optional().describe("One period only; default all") }),
+    readOnly: true,
+    run: ({ period }, { userId }) => {
+      const { current, moves } = netWorthMoves(userId);
+      return { currency: current.currency, netWorth: current.netCents / 100, moves: period ? moves.filter((m) => m.key === period) : moves };
+    },
+  }),
+  tool({
+    name: "list_jobs",
+    title: "Jobs and end-of-service gratuity",
+    description:
+      "The user's jobs with the end-of-service gratuity (EOSG) accrued under each job's country's labour law: years of service, amount owed if they resigned today and if they were let go today, how it was computed, the figure counted in net worth, accrual per day, and the next date the rule improves (e.g. UAE 5-year step from 21 to 30 days a year). Amounts are in the job's currency. Statutory minimums: contracts can be more generous.",
+    input: z.object({ includeArchived: z.boolean().default(false) }),
+    readOnly: true,
+    run: ({ includeArchived }, { userId }) =>
+      jobsSvc.listJobs(userId, { includeArchived }).map(({ account: _a, ...j }) => j),
   }),
   tool({
     name: "list_accounts",
@@ -455,6 +483,19 @@ export const TOOLS = [
     input: accountsSvc.accountInputSchema,
     readOnly: false,
     run: (i, { userId }) => accountsSvc.createAccount(userId, i),
+  }),
+  tool({
+    name: "save_job",
+    title: "Add or update a job",
+    description:
+      "Add a job (or update one with accountId) so its end-of-service gratuity accrues in net worth under the country's law. Countries: AE (UAE mainland: 21 days of basic a year for 5 years then 30, from 1 year, cap 2 years' pay), AE_DIFC (DEWS 5.83%/8.33% of basic a month), SA (half/full month a year, reduced on resignation), QA (3 weeks of basic a year), FR (indemnité légale on dismissal), CUSTOM (days a year). Give the salary the law uses — UAE and Qatar use BASIC salary without allowances — and its currency (e.g. AED). Pass salaries[] for raises. When the gratuity is paid out, archive the account.",
+    input: jobsSvc.jobInputSchema,
+    readOnly: false,
+    run: (i, { userId }) => {
+      const { account: _a, ...job } = jobsSvc.saveJob(userId, i);
+      invalidateSqlSandbox(userId);
+      return job;
+    },
   }),
   tool({
     name: "update_account",

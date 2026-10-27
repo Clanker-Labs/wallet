@@ -81,3 +81,9 @@ export async function uploadText(upload: Upload): Promise<{ text: string; pages?
   }
   throw new Error("This upload is an image: it can only be read by a vision model (Claude API provider).");
 }
+
+/** Delete uploads older than `days` (statements already imported or read by the assistant). */
+export function purgeOldUploads(days = 90): number {
+  const cutoff = Date.now() - days * 86_400_000;
+  return db().$client.prepare("DELETE FROM uploads WHERE created_at < ?").run(cutoff).changes;
+}

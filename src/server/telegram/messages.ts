@@ -37,6 +37,7 @@ const CLASS_EMOJI: Record<AssetClass, string> = {
   real_estate: "🏠",
   crypto: "🪙",
   commodities: "🥇",
+  business: "🏢",
   other: "📦",
   liabilities: "💳",
 };

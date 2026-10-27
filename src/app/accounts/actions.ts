@@ -8,12 +8,15 @@ import {
   createAccount,
   deleteAccount,
   deleteSnapshot,
+  getAccountRow,
   recordBalance,
+  shareAccount,
+  unshareAccount,
   unarchiveAccount,
   updateAccount,
   type AccountInput,
 } from "@/server/services/accounts";
-import { today } from "@/server/services/settings";
+import { getSettings, today } from "@/server/services/settings";
 import { ACCOUNT_TYPES, type AccountType, type LoanParams } from "@/lib/domain";
 import { parseAmount } from "@/lib/money";
 import { isISODate } from "@/lib/dates";
@@ -80,7 +83,9 @@ function parseAccountForm(fd: FormData, mode: "create" | "edit"): { input?: Acco
     notes: str(fd, "notes") || null,
     loanParams: null,
     linkedAccountId: null,
+    country: str(fd, "country") || null,
   };
+  if (fd.has("companyId")) input.companyId = intId(fd.get("companyId"));
 
   if (mode === "create") {
     const balance = num(fd, "balance");
@@ -142,7 +147,8 @@ export async function updateAccountAction(fd: FormData): Promise<AccountActionSt
   if (!input) return { ok: false, message: error! };
   if (input.linkedAccountId === id) input.linkedAccountId = null;
   try {
-    updateAccount(uid, id, input);
+    const change = str(fd, "currencyChange");
+    updateAccount(uid, id, { ...input, ...(change === "relabel" || change === "convert" ? { currencyChange: change } : {}) });
     refresh();
     return { ok: true, message: "Saved", id };
   } catch (e) {
@@ -154,7 +160,7 @@ export async function updateAccountAction(fd: FormData): Promise<AccountActionSt
 export async function quickRecordBalance(fd: FormData): Promise<boolean> {
   const uid = await requireUid();
   const accountId = intId(fd.get("accountId"));
-  const amount = parseAmount(String(fd.get("amount") ?? ""));
+  const amount = parseAmount(String(fd.get("amount") ?? ""), getSettings(uid).locale);
   if (!accountId || amount === null) return false;
   recordBalance(uid, { accountId, balance: amount, source: "manual" });
   refresh();
@@ -166,7 +172,7 @@ export async function recordBalanceAction(fd: FormData): Promise<AccountActionSt
   const uid = await requireUid();
   const accountId = intId(fd.get("accountId"));
   if (!accountId) return { ok: false, message: "Unknown account." };
-  const amount = parseAmount(str(fd, "amount"));
+  const amount = parseAmount(str(fd, "amount"), getSettings(uid).locale);
   if (amount === null) return { ok: false, message: "Type the balance, e.g. 1234.56" };
   const date = str(fd, "date") || today(uid);
   if (!isISODate(date)) return { ok: false, message: "Pick a valid date." };
@@ -211,4 +217,41 @@ export async function deleteAccountAction(fd: FormData): Promise<void> {
   deleteAccount(uid, id);
   refresh();
   redirect("/accounts");
+}
+
+/** Add or remove an early repayment / rate change on a loan; the schedule is recomputed. */
+export async function saveLoanEventsAction(accountId: number, events: NonNullable<LoanParams["events"]>): Promise<AccountActionState> {
+  const uid = await requireUid();
+  try {
+    const acc = getAccountRow(uid, accountId);
+    if (!acc.loanParams) return { ok: false, message: "This account has no loan schedule." };
+    updateAccount(uid, accountId, { loanParams: { ...acc.loanParams, events } });
+    refresh();
+    return { ok: true, message: "Schedule updated" };
+  } catch (e) {
+    return { ok: false, message: errorMessage(e) };
+  }
+}
+
+/** Share an account with another member (or change their role/share). */
+export async function shareAccountAction(accountId: number, memberId: string, role: "view" | "edit", sharePct: number): Promise<AccountActionState> {
+  const uid = await requireUid();
+  try {
+    shareAccount(uid, accountId, memberId, role, sharePct);
+    refresh();
+    return { ok: true, message: "Shared" };
+  } catch (e) {
+    return { ok: false, message: errorMessage(e) };
+  }
+}
+
+export async function unshareAccountAction(accountId: number, memberId: string): Promise<AccountActionState> {
+  const uid = await requireUid();
+  try {
+    unshareAccount(uid, accountId, memberId);
+    refresh();
+    return { ok: true, message: "No longer shared" };
+  } catch (e) {
+    return { ok: false, message: errorMessage(e) };
+  }
 }

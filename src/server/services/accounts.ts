@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/server/db/client";
-import { accounts, balanceSnapshots, type Account } from "@/server/db/schema";
+import { accountShares, accounts, balanceSnapshots, users, type Account } from "@/server/db/schema";
 import {
   ACCOUNT_TYPE_KEYS,
   ASSET_CLASSES,
@@ -14,10 +14,13 @@ import {
 } from "@/lib/domain";
 import { toCents } from "@/lib/money";
 import { addDays, isISODate } from "@/lib/dates";
-import { loanBalanceOn } from "@/lib/finance/loan";
+import { scheduleBalanceOn } from "@/lib/finance/loan";
 import { gratuityOn, gratuityParamsSchema } from "@/lib/finance/gratuity";
 import { getSettings, today } from "./settings";
 import { holdingsValueCents, valuationContext, type ValuationContext } from "./valuation";
+import { fxConverter } from "./fx";
+import { companyMonths, trailingTwelve, type CompanyMonth } from "./company-pnl";
+import { audit } from "./audit";
 
 export const currencySchema = z
   .string()
@@ -31,6 +34,31 @@ export const loanParamsSchema = z.object({
   durationMonths: z.number().int().min(1).max(600),
   startDate: z.string().refine(isISODate, "Expected YYYY-MM-DD"),
   insuranceRatePct: z.number().min(0).max(5).optional(),
+  events: z
+    .array(
+      z.object({
+        date: z.string().refine(isISODate, "Expected YYYY-MM-DD"),
+        type: z.enum(["prepayment", "rate_change"]),
+        amount: z.number().positive().optional(),
+        ratePct: z.number().min(0).max(30).optional(),
+        keep: z.enum(["duration", "payment"]).optional(),
+      }),
+    )
+    .max(100)
+    .optional()
+    .describe("Early repayments and rate renegotiations since the start"),
+});
+
+export const companyParamsSchema = z.object({
+  country: z
+    .string()
+    .trim()
+    .length(2)
+    .transform((s) => s.toUpperCase()),
+  legalForm: z.string().trim().max(60).nullish(),
+  valuation: z.enum(["book", "revenue_multiple", "profit_multiple", "manual"]).default("book"),
+  multiple: z.number().min(0).max(100).nullish(),
+  fiscalYearStartMonth: z.number().int().min(1).max(12).nullish(),
 });
 
 export const accountInputSchema = z.object({
@@ -44,6 +72,15 @@ export const accountInputSchema = z.object({
   linkedAccountId: z.number().int().nullish(),
   loanParams: loanParamsSchema.nullish(),
   gratuityParams: gratuityParamsSchema.nullish().describe("For a job (type end_of_service): country, dates and salary the gratuity is computed from"),
+  companyParams: companyParamsSchema.nullish().describe("For a company (type company): its country, legal form and how to value it"),
+  companyId: z.number().int().nullish().describe("The company this account belongs to (its bank, brokerage, loan)"),
+  country: z
+    .string()
+    .trim()
+    .length(2)
+    .transform((s) => s.toUpperCase())
+    .nullish()
+    .describe("ISO country the account is in (FR for a French flat): decides where its income is taxed"),
   notes: z.string().max(2000).nullish(),
   initialBalance: z.number().optional().describe("Current balance in the account currency, recorded as of today"),
 });
@@ -62,14 +99,28 @@ export interface AccountWithBalance extends Account {
   derivedFromLoan: boolean;
   /** A job: the balance is the end-of-service gratuity accrued under its country's law. */
   derivedFromJob: boolean;
+  /** A company valued from its accounts or its revenue/profit. */
+  derivedFromCompany: boolean;
+  /** Set when another member shared this account with you: their name, and what you may do. */
+  sharedBy?: string | null;
+  shareRole?: "view" | "edit" | null;
   /** Value comes from holdings (stocks, ETFs…) × market prices. */
   valuedByHoldings: boolean;
   holdingsCount: number;
 }
 
+/** The company an account is attached to must be one of yours, and companies don't nest. */
+function requireCompany(uid: string, companyId: number, childIsCompany: boolean) {
+  const c = getAccountRow(uid, companyId);
+  if (!c.companyParams) throw new Error(`${c.name} is not a company.`);
+  if (childIsCompany) throw new Error("A company can't belong to another company here — add it as a separate company.");
+}
+
 export function createAccount(uid: string, raw: AccountInput): Account {
   const input = accountInputSchema.parse(raw);
   if (input.type === "end_of_service" && !input.gratuityParams) throw new Error("A job needs its country, start date and salary (gratuityParams).");
+  if (input.type === "company" && !input.companyParams) throw new Error("A company needs its country and how to value it (companyParams).");
+  if (input.companyId) requireCompany(uid, input.companyId, input.type === "company");
   const assetClass: AssetClass = input.assetClass ?? assetClassFor(input.type);
   if (input.linkedAccountId) getAccountRow(uid, input.linkedAccountId);
   const account = db()
@@ -86,19 +137,47 @@ export function createAccount(uid: string, raw: AccountInput): Account {
       linkedAccountId: input.linkedAccountId ?? null,
       loanParams: input.loanParams ?? null,
       gratuityParams: input.gratuityParams ?? null,
+      companyParams: input.companyParams ?? null,
+      companyId: input.companyId ?? null,
+      country: input.country ?? input.companyParams?.country ?? null,
       notes: input.notes ?? null,
     })
     .returning()
     .get();
-  if (input.initialBalance !== undefined && !input.loanParams && !input.gratuityParams) {
+  if (input.initialBalance !== undefined && !input.loanParams && !input.gratuityParams && (!input.companyParams || input.companyParams.valuation === "manual")) {
     recordBalance(uid, { accountId: account.id, balance: input.initialBalance, source: "manual" });
   }
+  audit(uid, "account", account.id, "create", `Added ${account.name} (${account.type}, ${account.currency})`);
   return account;
 }
 
-export function updateAccount(uid: string, id: number, raw: Partial<AccountInput>): Account {
-  getAccountRow(uid, id);
+/**
+ * relabel: the currency was wrong, the numbers are right (keep them).
+ * convert: the account really changed currency — convert every past balance
+ * at its own date's rate, so history keeps its value.
+ */
+export type CurrencyChange = "relabel" | "convert";
+
+export function updateAccount(uid: string, id: number, raw: Partial<AccountInput> & { currencyChange?: CurrencyChange }): Account {
+  const before = getAccountRow(uid, id);
   const input = accountInputSchema.partial().parse(raw);
+  if (input.currency !== undefined && input.currency !== before.currency) {
+    const snaps = db().select({ id: balanceSnapshots.id, date: balanceSnapshots.date, balanceCents: balanceSnapshots.balanceCents }).from(balanceSnapshots).where(eq(balanceSnapshots.accountId, id)).all();
+    if (snaps.some((s) => s.balanceCents !== 0) && !raw.currencyChange)
+      throw new Error(
+        `${before.name} has ${snaps.length} recorded balance${snaps.length > 1 ? "s" : ""} in ${before.currency}. Say whether the currency was just wrong (relabel: keep the numbers) or the account really changed currency (convert: each past balance at its date's rate).`,
+      );
+    if (raw.currencyChange === "convert") {
+      const fx = fxConverter();
+      // Convert first, write only if every date had a rate: never half a history.
+      const converted = snaps.map((s) => ({ id: s.id, cents: fx.convertCents(s.balanceCents, before.currency, input.currency!, s.date) }));
+      if (fx.missing.size) throw new Error(`No exchange rate for ${[...fx.missing].join(", ")} on some of those dates — nothing was changed.`);
+      const stmt = db().$client.prepare("UPDATE balance_snapshots SET balance_cents = ? WHERE id = ?");
+      db().$client.transaction(() => {
+        for (const c of converted) stmt.run(c.cents, c.id);
+      })();
+    }
+  }
   const patch: Partial<typeof accounts.$inferInsert> = {};
   if (input.name !== undefined) patch.name = input.name;
   if (input.institution !== undefined) patch.institution = input.institution ?? null;
@@ -115,13 +194,25 @@ export function updateAccount(uid: string, id: number, raw: Partial<AccountInput
   }
   if (input.loanParams !== undefined) patch.loanParams = input.loanParams ?? null;
   if (input.gratuityParams !== undefined) patch.gratuityParams = input.gratuityParams ?? null;
+  if (input.companyParams !== undefined) patch.companyParams = input.companyParams ?? null;
+  if (input.country !== undefined) patch.country = input.country ?? null;
+  if (input.companyId !== undefined) {
+    if (input.companyId) {
+      if (input.companyId === id) throw new Error("An account can't belong to itself.");
+      requireCompany(uid, input.companyId, !!getAccountRow(uid, id).companyParams);
+    }
+    patch.companyId = input.companyId ?? null;
+  }
   if (input.notes !== undefined) patch.notes = input.notes ?? null;
-  return db()
+  const updated = db()
     .update(accounts)
     .set(patch)
     .where(and(eq(accounts.id, id), eq(accounts.userId, uid)))
     .returning()
     .get()!;
+  const fields = Object.keys(patch).filter((k) => JSON.stringify(patch[k as keyof typeof patch]) !== JSON.stringify(before[k as keyof Account]));
+  if (fields.length) audit(uid, "account", id, "update", `Changed ${updated.name}: ${fields.join(", ")}${raw.currencyChange ? ` (${raw.currencyChange} from ${before.currency})` : ""}`);
+  return updated;
 }
 
 /** Close an account: it keeps its history and drops to zero from today. */
@@ -130,6 +221,7 @@ export function archiveAccount(uid: string, id: number) {
   const date = today(uid);
   db().update(accounts).set({ archivedAt: date }).where(eq(accounts.id, id)).run();
   writeSnapshot(id, date, 0, "Account closed", "archive");
+  audit(uid, "account", id, "archive", `Archived account ${id}`);
 }
 
 /** Reopen an account. Drops the 0 "closed" snapshot so its last real balance (or loan schedule) applies again. */
@@ -159,6 +251,8 @@ export function deleteAccount(uid: string, id: number) {
     .set({ linkedAccountId: null })
     .where(and(eq(accounts.userId, uid), eq(accounts.linkedAccountId, id)))
     .run();
+  const gone = getAccountRow(uid, id);
+  audit(uid, "account", id, "delete", `Deleted ${gone.name} and its history`);
   db().delete(accounts).where(eq(accounts.id, id)).run();
 }
 
@@ -182,9 +276,18 @@ function writeSnapshot(accountId: number, date: string, cents: number, note: str
 }
 
 /** Upsert the balance of an account for a day. */
+/** Yours, or shared with you with "edit": the balance can be recorded. */
+function writableForBalance(uid: string, id: number): Account {
+  const a = getReadableAccount(uid, id);
+  if ("shareRole" in a && a.shareRole !== "edit") throw new Error(`${a.sharedBy} shared ${a.name} with you to view, not to edit.`);
+  return a;
+}
+
 export function recordBalance(uid: string, raw: z.input<typeof recordBalanceSchema>) {
   const input = recordBalanceSchema.parse(raw);
-  const account = getAccountRow(uid, input.accountId);
+  const account = writableForBalance(uid, input.accountId);
+  if (account.companyParams && account.companyParams.valuation !== "manual" && input.balance !== 0)
+    throw new Error(`${account.name} is valued from ${account.companyParams.valuation === "book" ? "its accounts" : "its revenue or profit"}. Switch its valuation to manual to record a value.`);
   if (account.loanParams && input.balance !== 0)
     throw new Error(`${account.name} follows its amortization schedule, so a recorded balance would be ignored. Change its loan terms instead (edit the account), or archive it once repaid.`);
   if (account.gratuityParams && input.balance !== 0)
@@ -193,6 +296,8 @@ export function recordBalance(uid: string, raw: z.input<typeof recordBalanceSche
   const balance = isLiability(account.assetClass) ? Math.abs(input.balance) : input.balance;
   const balanceCents = toCents(balance);
   writeSnapshot(account.id, date, balanceCents, input.note ?? null, input.source);
+  // In the owner's log, with who did it (a partner may record on a shared account).
+  audit(account.userId, "balance", account.id, "record", `${account.name}: ${(balanceCents / 100).toFixed(2)} ${account.currency} on ${date}${input.source !== "manual" ? ` (${input.source})` : ""}`, uid);
   return { account, date, balanceCents };
 }
 
@@ -216,7 +321,10 @@ export function deleteSnapshot(uid: string, id: number) {
     .innerJoin(accounts, eq(accounts.id, balanceSnapshots.accountId))
     .where(and(eq(balanceSnapshots.id, id), eq(accounts.userId, uid)))
     .get();
-  if (row) db().delete(balanceSnapshots).where(eq(balanceSnapshots.id, id)).run();
+  if (row) {
+    db().delete(balanceSnapshots).where(eq(balanceSnapshots.id, id)).run();
+    audit(uid, "balance", id, "delete", `Deleted a recorded balance`);
+  }
 }
 
 /** An account of this user, or an error (never another user's account). */
@@ -231,7 +339,7 @@ export function getAccountRow(uid: string, id: number): Account {
 }
 
 export function listSnapshots(uid: string, accountId: number) {
-  getAccountRow(uid, accountId);
+  getReadableAccount(uid, accountId);
   return db()
     .select()
     .from(balanceSnapshots)
@@ -244,11 +352,15 @@ type Snap = { date: string; balanceCents: number };
 
 /** Balance of one account on a date, in its own currency. */
 export function balanceOnDate(
-  account: Pick<Account, "id" | "currency" | "loanParams"> & Partial<Pick<Account, "gratuityParams" | "archivedAt" | "createdAt">>,
+  account: Pick<Account, "id" | "currency" | "loanParams"> & Partial<Pick<Account, "gratuityParams" | "archivedAt" | "createdAt" | "companyParams">>,
   snapshots: Snap[],
   date: string,
   ctx: ValuationContext,
-): { cents: number; lastUpdated: string | null; derived: "loan" | "job" | "holdings" | null } {
+): { cents: number; lastUpdated: string | null; derived: "loan" | "job" | "holdings" | "company" | null } {
+  if (account.companyParams && account.companyParams.valuation !== "manual") {
+    if (account.archivedAt && date >= account.archivedAt) return { cents: 0, lastUpdated: account.archivedAt, derived: null };
+    return { cents: companyValueCents(account as Account, date, ctx), lastUpdated: date, derived: "company" };
+  }
   if (account.gratuityParams) {
     // Paid out: a zero snapshot (archiving records one) ends the accrual.
     const paid = snapshots.findLast((s) => s.date <= date && s.balanceCents === 0);
@@ -262,7 +374,7 @@ export function balanceOnDate(
     if (closing) return { cents: 0, lastUpdated: closing.date, derived: null };
     // Funds are released about a month before the first payment.
     if (date < addDays(account.loanParams.startDate, -31)) return { cents: 0, lastUpdated: null, derived: "loan" };
-    return { cents: toCents(loanBalanceOn(account.loanParams, date)), lastUpdated: date, derived: "loan" };
+    return { cents: toCents(scheduleBalanceOn(account.loanParams, date)), lastUpdated: date, derived: "loan" };
   }
   let found: Snap | undefined;
   for (const s of snapshots) {
@@ -286,6 +398,47 @@ export function balanceOnDate(
   return { cents: found?.balanceCents ?? 0, lastUpdated: found?.date ?? null, derived: null };
 }
 
+/**
+ * What a company is worth on a date, in its currency, before your ownership
+ * share: its accounts' net value (book), or trailing-12-month revenue or
+ * profit times a multiple.
+ */
+export function companyValueCents(company: Account, date: string, ctx: ValuationContext): number {
+  const p = company.companyParams!;
+  if (p.valuation === "book") {
+    const key = `company-children:${company.id}`;
+    let kids = ctx.cache.get(key) as { accounts: Account[]; snaps: Map<number, Snap[]> } | undefined;
+    if (!kids) {
+      const accounts_ = db()
+        .select()
+        .from(accounts)
+        // The company's owner's accounts: a partner it is shared with sees the same value.
+        .where(and(eq(accounts.userId, company.userId), eq(accounts.companyId, company.id)))
+        .all()
+        .filter((a) => !a.companyParams); // no companies inside companies
+      kids = { accounts: accounts_, snaps: snapshotsByAccount(company.userId, accounts_.map((a) => a.id)) };
+      ctx.cache.set(key, kids);
+    }
+    let total = 0;
+    for (const k of kids.accounts) {
+      if (k.archivedAt && k.archivedAt <= date) continue;
+      const b = balanceOnDate(k, kids.snaps.get(k.id) ?? [], date, ctx);
+      const owned = Math.round((b.cents * k.ownershipPct) / 100);
+      total += (isLiability(k.assetClass) ? -1 : 1) * ctx.fx.convertCents(owned, k.currency, company.currency, date);
+    }
+    return total;
+  }
+  const key = `company-pnl:${company.id}`;
+  let months = ctx.cache.get(key) as CompanyMonth[] | undefined;
+  if (!months) {
+    months = companyMonths(company.userId, company, ctx.fx);
+    ctx.cache.set(key, months);
+  }
+  const ttm = trailingTwelve(months, date);
+  const multiple = p.multiple ?? (p.valuation === "revenue_multiple" ? 1 : 5);
+  return Math.round((p.valuation === "revenue_multiple" ? ttm.revenueCents : Math.max(0, ttm.profitCents)) * multiple);
+}
+
 export function withBalance(account: Account, snapshots: Snap[], date: string, ctx: ValuationContext): AccountWithBalance {
   const b = balanceOnDate(account, snapshots, date, ctx);
   const ownedCents = Math.round((b.cents * account.ownershipPct) / 100);
@@ -296,10 +449,12 @@ export function withBalance(account: Account, snapshots: Snap[], date: string, c
     balanceCents: b.cents,
     ownedCents,
     baseOwnedCents,
-    netCents: account.includeInNetWorth ? sign * baseOwnedCents : 0,
+    // A company's own accounts are counted through the company, not again on their own.
+    netCents: account.includeInNetWorth && !account.companyId ? sign * baseOwnedCents : 0,
     lastUpdated: b.lastUpdated,
     derivedFromLoan: b.derived === "loan",
     derivedFromJob: b.derived === "job",
+    derivedFromCompany: b.derived === "company",
     valuedByHoldings: b.derived === "holdings",
     holdingsCount: ctx.holdingsByAccount.get(account.id)?.length ?? 0,
   };
@@ -331,18 +486,83 @@ export function snapshotsByAccount(uid: string, accountIds?: number[]): Map<numb
   return byAccount;
 }
 
+// ── Sharing with another member ────────────────────────────────────────────
+
+export type SharedAccount = Account & { sharedBy: string; shareRole: "view" | "edit" };
+
+/**
+ * Accounts other members shared with you, as your accounts: ownershipPct is
+ * YOUR share (the share's sharePct), so your net worth counts your part.
+ */
+export function sharedWith(uid: string, opts: { includeArchived?: boolean } = {}): SharedAccount[] {
+  return db()
+    .select({ a: accounts, share: accountShares, owner: users.name })
+    .from(accountShares)
+    .innerJoin(accounts, eq(accounts.id, accountShares.accountId))
+    .innerJoin(users, eq(users.id, accounts.userId))
+    .where(opts.includeArchived ? eq(accountShares.userId, uid) : and(eq(accountShares.userId, uid), isNull(accounts.archivedAt)))
+    .all()
+    .map(({ a, share, owner }) => ({ ...a, ownershipPct: share.sharePct, sharedBy: owner, shareRole: share.role }));
+}
+
+/** Your accounts and the ones shared with you. */
+export function visibleAccounts(uid: string, opts: { includeArchived?: boolean } = {}): (Account | SharedAccount)[] {
+  const own = db()
+    .select()
+    .from(accounts)
+    .where(opts.includeArchived ? eq(accounts.userId, uid) : and(eq(accounts.userId, uid), isNull(accounts.archivedAt)))
+    .all();
+  return [...own, ...sharedWith(uid, opts)];
+}
+
+export function shareAccount(uid: string, accountId: number, memberId: string, role: "view" | "edit", sharePct: number) {
+  const a = getAccountRow(uid, accountId);
+  if (memberId === uid) throw new Error("That's your own account.");
+  const member = db().select().from(users).where(eq(users.id, memberId)).get();
+  if (!member) throw new Error("No such member.");
+  if (!(sharePct >= 0 && sharePct <= 100)) throw new Error("Their share must be between 0 and 100%.");
+  db()
+    .insert(accountShares)
+    .values({ accountId, userId: memberId, role, sharePct })
+    .onConflictDoUpdate({ target: [accountShares.accountId, accountShares.userId], set: { role, sharePct } })
+    .run();
+  audit(uid, "account", accountId, "share", `Shared ${a.name} with ${member.name} (${role}, their share ${sharePct}%)`);
+}
+
+export function unshareAccount(uid: string, accountId: number, memberId: string) {
+  const a = getAccountRow(uid, accountId);
+  db().delete(accountShares).where(and(eq(accountShares.accountId, accountId), eq(accountShares.userId, memberId))).run();
+  audit(uid, "account", accountId, "unshare", `Stopped sharing ${a.name}`);
+}
+
+export function listShares(uid: string, accountId: number) {
+  getAccountRow(uid, accountId);
+  return db()
+    .select({ userId: accountShares.userId, name: users.name, role: accountShares.role, sharePct: accountShares.sharePct })
+    .from(accountShares)
+    .innerJoin(users, eq(users.id, accountShares.userId))
+    .where(eq(accountShares.accountId, accountId))
+    .all();
+}
+
+/** An account you may read: yours, or shared with you (with your share applied). */
+export function getReadableAccount(uid: string, id: number): Account | SharedAccount {
+  const own = db().select().from(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, uid))).get();
+  if (own) return own;
+  const shared = sharedWith(uid, { includeArchived: true }).find((a) => a.id === id);
+  if (!shared) throw new Error(`Account ${id} not found`);
+  return shared;
+}
+
 export function listAccounts(
   uid: string,
   opts: { includeArchived?: boolean; date?: string; ctx?: ValuationContext } = {},
 ): AccountWithBalance[] {
   const ctx = opts.ctx ?? valuationContext(uid);
   const date = opts.date ?? ctx.today;
-  const rows = db()
-    .select()
-    .from(accounts)
-    .where(opts.includeArchived ? eq(accounts.userId, uid) : and(eq(accounts.userId, uid), isNull(accounts.archivedAt)))
-    .orderBy(asc(accounts.assetClass), asc(accounts.name))
-    .all();
+  const rows = visibleAccounts(uid, { includeArchived: opts.includeArchived }).sort(
+    (a, b) => a.assetClass.localeCompare(b.assetClass) || a.name.localeCompare(b.name),
+  );
   const byAccount = snapshotsByAccount(
     uid,
     rows.map((r) => r.id),
@@ -351,7 +571,7 @@ export function listAccounts(
 }
 
 export function getAccount(uid: string, id: number) {
-  const account = getAccountRow(uid, id);
+  const account = getReadableAccount(uid, id);
   const snapshots = listSnapshots(uid, id);
   const ctx = valuationContext(uid);
   return { account: withBalance(account, snapshots, ctx.today, ctx), snapshots, missingFx: [...ctx.fx.missing] };
@@ -386,6 +606,7 @@ export function staleAccounts(uid: string, days = 35): AccountWithBalance[] {
     (a) =>
       !a.derivedFromLoan &&
       !a.derivedFromJob &&
+      !a.derivedFromCompany &&
       !a.valuedByHoldings &&
       a.includeInNetWorth &&
       (a.lastUpdated === null || a.lastUpdated < cutoff),

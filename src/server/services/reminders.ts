@@ -194,3 +194,13 @@ export function upcomingReminders(uid: string, limit = 5) {
 export function pendingReminders(uid: string) {
   return listReminders(uid).filter((r) => r.enabled && r.nextNagAt !== null);
 }
+
+/**
+ * Recompute every enabled reminder's next run, e.g. after a time-zone change:
+ * "9:00 on the 1st" means 9:00 where you are now.
+ */
+export function rescheduleReminders(uid: string): number {
+  const list = db().select().from(reminders).where(and(eq(reminders.userId, uid), eq(reminders.enabled, true))).all();
+  for (const r of list) db().update(reminders).set({ nextRunAt: computeNext(uid, r) }).where(eq(reminders.id, r.id)).run();
+  return list.length;
+}

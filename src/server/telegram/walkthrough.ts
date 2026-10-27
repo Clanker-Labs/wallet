@@ -61,7 +61,7 @@ function summary(s: Walkthrough): string {
 /** Start a walkthrough; returns the first prompt. */
 export function startWalkthrough(uid: string, chatId: number, now = Date.now()): string {
   const accounts = listAccounts(uid)
-    .filter((a) => !a.derivedFromLoan && !a.derivedFromJob && !a.valuedByHoldings && a.includeInNetWorth)
+    .filter((a) => !a.derivedFromLoan && !a.derivedFromJob && !a.derivedFromCompany && !a.valuedByHoldings && a.includeInNetWorth)
     .sort((a, b) => (a.lastUpdated ?? "").localeCompare(b.lastUpdated ?? ""));
   if (!accounts.length) return "🤷 No accounts to update yet — add them in the web app.";
   const s: Walkthrough = {

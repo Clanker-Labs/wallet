@@ -84,3 +84,103 @@ export function impliedAnnualRate(presentValue: number, payment: number, months:
   }
   return ((lo + hi) / 2) * 12 * 100;
 }
+
+// ── Loans that changed: early repayments and renegotiated rates ──────────
+
+export interface ScheduleEntry {
+  /** Payment number (1-based), or 0 for an early repayment between payments. */
+  n: number;
+  date: string;
+  kind: "payment" | "prepayment";
+  payment: number;
+  interest: number;
+  principal: number;
+  /** Remaining principal after this entry. */
+  balance: number;
+  ratePct: number;
+}
+
+const addMonthsIso = (iso: string, n: number) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  const target = new Date(Date.UTC(y, m - 1 + n, 1));
+  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d, last));
+  return target.toISOString().slice(0, 10);
+};
+
+/**
+ * The real schedule, events included: each payment on its date, early
+ * repayments as their own entries, the rate and payment recomputed after each
+ * event. Without events it equals amortizationSchedule.
+ */
+export function loanSchedule(params: LoanParams): ScheduleEntry[] {
+  const events = [...(params.events ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+  const out: ScheduleEntry[] = [];
+  let balance = params.principal;
+  let rate = params.annualRatePct;
+  let remaining = params.durationMonths;
+  let pmt = monthlyPayment(balance, rate, remaining);
+  let e = 0;
+  for (let n = 1; balance > 0.005 && n <= params.durationMonths + 600; n++) {
+    const date = addMonthsIso(params.startDate, n - 1);
+    // Events dated before this payment change the loan first.
+    while (e < events.length && events[e].date <= date) {
+      const ev = events[e++];
+      if (ev.type === "prepayment" && ev.amount) {
+        const paid = Math.min(balance, ev.amount);
+        balance -= paid;
+        out.push({ n: 0, date: ev.date, kind: "prepayment", payment: paid, interest: 0, principal: paid, balance, ratePct: rate });
+      } else if (ev.type === "rate_change" && ev.ratePct !== undefined) {
+        rate = ev.ratePct;
+      }
+      if (balance <= 0.005) break;
+      if ((ev.keep ?? "duration") === "duration") {
+        pmt = monthlyPayment(balance, rate, remaining);
+      } else {
+        // Same payment: the term follows. A payment that no longer covers interest keeps the term instead.
+        const r = rate / 100 / 12;
+        if (r > 0 && pmt <= balance * r) pmt = monthlyPayment(balance, rate, remaining);
+      }
+    }
+    if (balance <= 0.005) break;
+    const r = rate / 100 / 12;
+    const interest = balance * r;
+    let principal = pmt - interest;
+    if (principal >= balance - 0.005 || remaining <= 1) principal = balance;
+    balance = Math.max(0, balance - principal);
+    out.push({ n, date, kind: "payment", payment: principal + interest, interest, principal, balance, ratePct: rate });
+    remaining = Math.max(1, remaining - 1);
+  }
+  return out;
+}
+
+/** Balance on a date, events included. */
+export function scheduleBalanceOn(params: LoanParams, asOf: string): number {
+  if (!params.events?.length) return loanBalanceOn(params, asOf);
+  let balance = params.principal;
+  for (const row of loanSchedule(params)) {
+    if (row.date > asOf) break;
+    balance = row.balance;
+  }
+  return balance;
+}
+
+/** Interest paid between two dates (inclusive): what a French réel régime deducts. */
+export function interestBetween(params: LoanParams, from: string, to: string): number {
+  let sum = 0;
+  for (const row of loanSchedule(params)) if (row.kind === "payment" && row.date >= from && row.date <= to) sum += row.interest;
+  return sum;
+}
+
+/** The monthly payment in force on a date (0 once repaid). */
+export function paymentOn(params: LoanParams, date: string): number {
+  const rows = loanSchedule(params).filter((r) => r.kind === "payment");
+  const next = rows.find((r) => r.date >= date) ?? null;
+  return next ? next.payment : 0;
+}
+
+/** When the loan ends, events included. */
+export function loanEndDate(params: LoanParams): string | null {
+  const rows = loanSchedule(params).filter((r) => r.kind === "payment");
+  return rows.at(-1)?.date ?? null;
+}

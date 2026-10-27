@@ -71,3 +71,15 @@ describe("CSV date order, decided per column", () => {
     expect(detectDateFormat(["13/01/2026", "01/13/2026"]).mixed).toBe(true);
   });
 });
+
+describe("amounts in the user's locale", () => {
+  it("reads 1.500 as fifteen hundred in French, one and a half in English", async () => {
+    const { parseAmount } = await import("@/lib/money");
+    expect(parseAmount("1.500", "fr-FR")).toBe(1500);
+    expect(parseAmount("1.500", "en-US")).toBe(1.5);
+    expect(parseAmount("1,500", "fr-FR")).toBe(1.5);
+    expect(parseAmount("1,500", "en-US")).toBe(1500);
+    expect(parseAmount("1 234,56", "fr-FR")).toBe(1234.56);
+    expect(parseAmount("1.500")).toBe(1.5); // no locale: unchanged behaviour
+  });
+});

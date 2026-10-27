@@ -4,9 +4,10 @@ import { staleAccounts } from "./accounts";
 import { countUncategorized } from "./transactions";
 import { pendingReminders, upcomingReminders } from "./reminders";
 import { getSettings } from "./settings";
+import { recurringNudges } from "./recurring";
 
 export interface Nudge {
-  kind: "stale_balance" | "uncategorized" | "over_budget" | "pending_reminder" | "missing_rate" | "missing_price";
+  kind: "stale_balance" | "uncategorized" | "over_budget" | "pending_reminder" | "missing_rate" | "missing_price" | "recurring_late" | "price_change";
   text: string;
   href: string;
 }
@@ -41,6 +42,8 @@ export function getOverview(uid: string) {
   for (const l of budget.lines.filter((l) => l.status === "over"))
     nudges.push({ kind: "over_budget", text: `${l.name} is over budget`, href: "/budgets" });
 
+  for (const n of recurringNudges(uid))
+    nudges.push({ kind: n.kind === "late" ? "recurring_late" : "price_change", text: n.text, href: "/recurring" });
   for (const c of current.missingFx)
     nudges.push({ kind: "missing_rate", text: `No exchange rate for ${c} yet — amounts in ${c} count as 0`, href: "/settings" });
   for (const p of current.missingPrices.slice(0, 3))

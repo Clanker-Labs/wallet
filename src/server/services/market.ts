@@ -1,8 +1,9 @@
 import { snapshotHoldingAccounts } from "./accounts";
 import { syncStaleConnections } from "./connections";
 import { ensureFreshRates, ensureHistoricalRates } from "./fx";
-import { refreshPrices } from "./prices";
+import { ensurePriceHistory, refreshPrices } from "./prices";
 import { listUsers } from "./users";
+import { reconcileRecurring } from "./recurring";
 
 /**
  * Exchange rates, market prices, brokerage syncs, then today's value of
@@ -21,10 +22,16 @@ export async function refreshMarketData(opts: { fetchImpl?: typeof fetch } = {})
     if (history.days || history.monthEnds) log.push(`💱 past rates filled: ${history.days} days, ${history.monthEnds} month-ends`);
     if (history.error) log.push(`⚠️ past rates: ${history.error}`);
     const prices = await refreshPrices({ fetchImpl: opts.fetchImpl });
+    const priceHistory = await ensurePriceHistory({ fetchImpl: opts.fetchImpl });
+    if (priceHistory.updated.length) log.push(`📈 a year of prices for: ${priceHistory.updated.join(", ")}`);
+    if (priceHistory.failed.length) log.push(`⚠️ price history: ${priceHistory.failed[0].error}${priceHistory.failed.length > 1 ? ` (+${priceHistory.failed.length - 1} more)` : ""}, retried later`);
     if (prices.updated.length) log.push(`📈 prices updated: ${prices.updated.join(", ")}`);
     if (prices.failed.length) log.push(`⚠️ prices: ${prices.failed.map((f) => f.error).join("; ")}`);
     log.push(...(await syncStaleConnections({ fetchImpl: opts.fetchImpl })).log);
-    for (const u of listUsers()) snapshotHoldingAccounts(u.id);
+    for (const u of listUsers()) {
+      snapshotHoldingAccounts(u.id);
+      reconcileRecurring(u.id); // moves late items on, links anything that arrived
+    }
   } catch (e) {
     log.push(`⚠️ market data: ${e instanceof Error ? e.message : String(e)}`);
   }

@@ -46,7 +46,8 @@ describe("market data refresh", () => {
     const { log } = await refreshMarketData({ fetchImpl: market.impl });
 
     expect(latestFxDate()).toBe(TODAY);
-    expect(log).toEqual([`💱 rates updated to ${TODAY}`, "📈 prices updated: VTI"]);
+    // VTI had no history: a year of it is fetched, then today's price.
+    expect(log).toEqual([`💱 rates updated to ${TODAY}`, "📈 a year of prices for: VTI", "📈 prices updated: VTI"]);
     expect(listAccounts(uid).find((a) => a.id === brokerage.id)!.balanceCents).toBe(3_000_00);
     expect(listSnapshots(uid, brokerage.id).map((s) => [s.date, s.balanceCents])).toContainEqual([TODAY, 3_000_00]);
   });

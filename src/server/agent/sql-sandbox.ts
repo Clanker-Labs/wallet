@@ -17,6 +17,13 @@ const USER_TABLES = [
   "reminders",
   "simulations",
   "settings",
+  "recurring",
+  "transaction_splits",
+  "company_financials",
+  "presence",
+  "tax_inputs",
+  "goals",
+  "changes",
 ] as const;
 
 const TTL_MS = 15_000;

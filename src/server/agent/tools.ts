@@ -12,6 +12,13 @@ import { refreshPrices, searchSymbols } from "@/server/services/prices";
 import { netWorthDaily, netWorthHistory, netWorthMoves, netWorthOn } from "@/server/services/networth";
 import * as jobsSvc from "@/server/services/jobs";
 import { matchTransfers } from "@/server/services/transfers";
+import * as recurringSvc from "@/server/services/recurring";
+import * as companiesSvc from "@/server/services/companies";
+import * as taxSvc from "@/server/services/tax";
+import * as goalsSvc from "@/server/services/goals";
+import { listChanges } from "@/server/services/audit";
+import { listUsers } from "@/server/services/users";
+import { investmentAnalytics } from "@/server/services/investment-analytics";
 import { getOverview } from "@/server/services/overview";
 import { getSettings, today } from "@/server/services/settings";
 import { purchaseInputSchema, simulatePurchase, capacityInputSchema, borrowingCapacity } from "@/lib/finance/mortgage";
@@ -53,11 +60,13 @@ const SQL_SCHEMA = `Tables (only your data; amounts are INTEGER cents in the row
 - holdings(id, account_id, symbol, name, asset_type, quantity REAL, currency, cost_basis REAL per unit, manual_price REAL, connection_id, external_id) — connection_id set = synced from a brokerage, overwritten by the next sync
 - prices(symbol, date, close REAL, currency) — daily closes of held symbols
 - fx_rates(currency, date, per_usd REAL) — units of currency per 1 USD
-- transactions(id, account_id, date, amount_cents [negative = spending], currency, description, category_id, notes, source)
+- transactions(id, account_id, date, amount_cents [negative = spending], currency, description [bank label], payee [display name], tags JSON array, category_id, recurring_id, notes, source)
+- transaction_splits(id, transaction_id, category_id, amount_cents) — parts of a split payment; when present they replace the transaction's category in totals
 - categories(id, name, kind ['income','expense','transfer'], icon)
-- category_rules(id, pattern, category_id) — lowercase substring of description → category
+- category_rules(id, pattern, category_id, match_type, account_id, direction, min_amount_cents, max_amount_cents, rename_to, add_tag) — rule: label match + optional conditions → category (+ payee rename, tag)
 - budgets(id, category_id, amount_cents, currency) — monthly envelope; currency NULL = the base currency
 - reminders(id, title, message, kind, account_id, frequency, day_of_month, day_of_week, month_of_year, date, time_of_day, nag_every_hours, enabled, next_run_at [ms epoch])
+- recurring(id, name, pattern, account_id, category_id, amount_cents [signed], currency, cadence, next_date, status ['active','suggested','paused','dismissed'], last_matched_date, last_change_pct) — expected payments; transactions.recurring_id links the real ones
 - simulations(id, name, type, params JSON); settings(key, value) — key 'currency' = base currency`;
 
 const csvMappingSchema = z.object({
@@ -148,13 +157,14 @@ export const TOOLS = [
     name: "list_transactions",
     title: "List transactions",
     description:
-      "Transactions, newest first, with category, account, currency and the amount converted to the base currency. Filter by date range, account, category (\"none\" = uncategorized) or a description search.",
+      "Transactions, newest first, with category, account, currency, payee (display name), tags, splitCount, recurringId and the amount converted to the base currency. Filter by date range, account, category (\"none\" = uncategorized), tag or a text search.",
     input: z.object({
       from: isoDate.optional(),
       to: isoDate.optional(),
       accountId: z.number().int().optional(),
       categoryId: z.union([z.number().int(), z.literal("none")]).optional(),
-      search: z.string().optional().describe("Case-insensitive substring of the description"),
+      search: z.string().optional().describe("Case-insensitive text in the bank label or payee"),
+      tag: z.string().optional().describe("Only transactions with this tag"),
       limit: z.number().int().min(1).max(500).default(50),
       offset: z.number().int().min(0).default(0),
     }),
@@ -468,6 +478,56 @@ export const TOOLS = [
       txSvc.categorizeTransactions(userId, transactionIds, categoryId, rememberPattern),
   }),
   tool({
+    name: "save_rule",
+    title: "Add or change a categorization rule",
+    description:
+      "A rule files transactions automatically (on add, on import, and with apply). Match the bank label (contains / starts / exact), optionally only on one account, only money in or out, or within an amount range; then set the category, and optionally rename the payee and add a tag. The most specific matching rule wins, then the longest pattern. Pass id to change a rule; set apply to also file existing uncategorized transactions.",
+    input: catSvc.ruleInputSchema.extend({ id: z.number().int().optional(), apply: z.boolean().default(true) }),
+    readOnly: false,
+    run: ({ apply, ...i }, { userId }) => {
+      const rule = catSvc.saveRule(userId, i);
+      const applied = apply ? catSvc.applyRulesToUncategorized(userId) : 0;
+      invalidateSqlSandbox(userId);
+      return { rule, applied };
+    },
+  }),
+  tool({
+    name: "delete_rule",
+    title: "Delete a rule",
+    description: "Delete a categorization rule. Transactions it filed keep their category.",
+    input: z.object({ id: z.number().int() }),
+    readOnly: false,
+    run: ({ id }, { userId }) => {
+      catSvc.deleteRule(userId, id);
+      return { deleted: id };
+    },
+  }),
+  tool({
+    name: "split_transaction",
+    title: "Split a transaction",
+    description:
+      "Split one payment over several categories (e.g. a supermarket receipt: groceries + household). Parts are signed like the transaction and must add up to it exactly; budgets then count each part in its category. An empty parts list removes the split.",
+    input: z.object({ transactionId: z.number().int(), parts: txSvc.splitInputSchema }),
+    readOnly: false,
+    run: ({ transactionId, parts }, { userId }) => {
+      const r = txSvc.setSplits(userId, transactionId, parts);
+      invalidateSqlSandbox(userId);
+      return { parts: r };
+    },
+  }),
+  tool({
+    name: "tag_transactions",
+    title: "Tag transactions",
+    description: "Add and/or remove free tags (e.g. trip-japan, reimbursable) on transactions. list_transactions filters by tag.",
+    input: z.object({ transactionIds: z.array(z.number().int()).max(1000), add: z.array(z.string()).optional(), remove: z.array(z.string()).optional() }),
+    readOnly: false,
+    run: ({ transactionIds, add, remove }, { userId }) => {
+      const r = txSvc.tagTransactions(userId, transactionIds, { add, remove });
+      invalidateSqlSandbox(userId);
+      return { ...r, tags: txSvc.listTags(userId) };
+    },
+  }),
+  tool({
     name: "create_category",
     title: "Create category",
     description: "Create a transaction category.",
@@ -489,10 +549,231 @@ export const TOOLS = [
     name: "create_account",
     title: "Create account",
     description:
-      "Create an account (bank, savings, brokerage, crypto wallet, property, loan…) in any currency. For an amortizing loan pass loanParams so its balance is computed automatically. For investment accounts, add positions with upsert_holding instead of a balance.",
+      "Create an account (bank, savings, brokerage, crypto wallet, property, loan…) in any currency. For an amortizing loan pass loanParams so its balance is computed automatically. For investment accounts, add positions with upsert_holding instead of a balance. Set country (FR for a French flat) so tax reports know where its income comes from, and companyId when the account belongs to one of the user's companies. Jobs and companies have their own tools (save_job, save_company).",
     input: accountsSvc.accountInputSchema,
     readOnly: false,
     run: (i, { userId }) => accountsSvc.createAccount(userId, i),
+  }),
+  tool({
+    name: "list_companies",
+    title: "Companies you own",
+    description:
+      "The user's companies as net-worth assets: country and legal form, valuation method (book = its own accounts' net value; revenue_multiple / profit_multiple = trailing-12-month figure × multiple; manual), value of 100% and the user's share (company currency and base currency), its own accounts (bank, brokerage, loans — counted through the company, never twice), revenue, expenses and profit per month and over the last 12 months, and the margin.",
+    input: z.object({ months: z.number().int().min(1).max(120).default(24).describe("Months of P&L to return") }),
+    readOnly: true,
+    run: ({ months }, { userId }) =>
+      companiesSvc.listCompanies(userId).map((c) => ({
+        id: c.account.id,
+        name: c.account.name,
+        currency: c.account.currency,
+        ownershipPct: c.account.ownershipPct,
+        params: c.params,
+        valueCents: c.valueCents,
+        ownedCents: c.ownedCents,
+        baseOwnedCents: c.baseOwnedCents,
+        accounts: c.accounts.map((a) => ({ id: a.id, name: a.name, type: a.type, currency: a.currency, balanceCents: a.balanceCents })),
+        ttm: c.ttm,
+        marginPct: c.marginPct,
+        months: c.months.slice(-months),
+      })),
+  }),
+  tool({
+    name: "save_company",
+    title: "Add or update a company",
+    description:
+      "Add a company the user owns (omit accountId) or update one. params.country is where it is taxed (AE, FR…), params.valuation picks how it is valued: 'book' (its own accounts' net value — then attach its bank/brokerage/loan accounts with companyId on create_account/update_account), 'revenue_multiple' or 'profit_multiple' (with params.multiple), or 'manual' (with initialValue for 100%). ownershipPct is the user's share.",
+    input: companiesSvc.companyInputSchema,
+    readOnly: false,
+    run: (i, { userId }) => {
+      const c = companiesSvc.saveCompany(userId, i);
+      invalidateSqlSandbox(userId);
+      return { id: c.account.id, name: c.account.name, valueCents: c.valueCents, ownedCents: c.ownedCents, params: c.params };
+    },
+  }),
+  tool({
+    name: "set_company_financials",
+    title: "Enter a company's month",
+    description:
+      "Record a company's revenue and expenses for one month (YYYY-MM, company currency, both positive), e.g. from the accountant, when its bank isn't imported. Added to what its accounts' transactions show. Zeros clear the month.",
+    input: z.object({ companyId: z.number().int(), month, revenue: z.number().min(0), expenses: z.number().min(0), note: z.string().max(300).optional() }),
+    readOnly: false,
+    run: ({ companyId, month, revenue, expenses, note }, { userId }) => {
+      const r = companiesSvc.setCompanyFinancials(userId, companyId, month, revenue, expenses, note);
+      invalidateSqlSandbox(userId);
+      return r ?? { cleared: month };
+    },
+  }),
+  tool({
+    name: "get_tax_report",
+    title: "Tax estimate for a year",
+    description:
+      "Estimate a year's taxes from the user's data, by country: personal income tax where they live (UAE: none; France: barème with parts) and on French-source income for non-residents (20%/30% minimum rate + 17.2% social charges on rent), French rental income (micro-foncier 30% or réel with loan interest from the schedule), IFI on French real estate above 1.3 M€, and corporate tax for each company where it is (UAE 9% above AED 375k with Small Business Relief / Qualifying Free Zone; France IS 15%/25%). Also days spent per country and residency notes. Every line cites its law; inputs it can't infer are listed in `inputs` and set with set_tax_input. An estimate, not a filing.",
+    input: z.object({ year: z.number().int().min(2000).max(2100) }),
+    readOnly: true,
+    run: ({ year }, { userId }) => taxSvc.taxReport(userId, year),
+  }),
+  tool({
+    name: "set_tax_input",
+    title: "Set a tax input",
+    description:
+      "Set what the tax estimate can't infer, for one year (or year 0 for every year): residence (ISO country, e.g. AE), homeOrJobInUae (true/false), fr.parts (family parts, e.g. 2 for a couple), fr.rental.regime (micro|reel), fr.rental.gross / fr.rental.expenses / fr.rental.interest (EUR, to override what was computed), fr.socialRate (standard|eea), fr.otherIncome, ifi.base (EUR), company.<id>.sbr / company.<id>.qfzp (true/false), company.<id>.rate (%), company.<id>.profit, other.<CC>.rate (% for income from a country without rules). An empty value clears it.",
+    input: z.object({ year: z.number().int().min(0).max(2100), key: z.string(), value: z.string() }),
+    readOnly: false,
+    run: ({ year, key, value }, { userId }) => taxSvc.setTaxInput(userId, year, key, value) ?? { cleared: key },
+  }),
+  tool({
+    name: "log_stay",
+    title: "Log time spent in a country",
+    description: "Record a stay (inclusive dates) in a country, for the tax-residency day count (UAE: 183 days, or 90 with a home or job there; France: séjour principal).",
+    input: taxSvc.presenceInputSchema,
+    readOnly: false,
+    run: (i, { userId }) => taxSvc.addPresence(userId, i),
+  }),
+  tool({
+    name: "list_stays",
+    title: "Stays per country",
+    description: "Logged stays, and days per country for a year.",
+    input: z.object({ year: z.number().int().min(2000).max(2100) }),
+    readOnly: true,
+    run: ({ year }, { userId }) => ({ stays: taxSvc.listPresence(userId, year), ...taxSvc.daysByCountry(userId, `${year}-01-01`, `${year}-12-31`) }),
+  }),
+  tool({
+    name: "share_account",
+    title: "Share an account with a partner",
+    description:
+      "Share one of the user's accounts with another member of this wallet (memberId from list_members): it shows in their accounts and net worth at sharePct of it. role 'edit' lets them record balances; 'view' doesn't. remove: true stops sharing. Transactions stay private.",
+    input: z.object({ accountId: z.number().int(), memberId: z.string(), role: z.enum(["view", "edit"]).default("view"), sharePct: z.number().min(0).max(100).default(50), remove: z.boolean().default(false) }),
+    readOnly: false,
+    run: ({ accountId, memberId, role, sharePct, remove }, { userId }) => {
+      if (remove) accountsSvc.unshareAccount(userId, accountId, memberId);
+      else accountsSvc.shareAccount(userId, accountId, memberId, role, sharePct);
+      return { shares: accountsSvc.listShares(userId, accountId) };
+    },
+  }),
+  tool({
+    name: "list_members",
+    title: "Members of this wallet",
+    description: "The other people with an account on this wallet (id and name), to share accounts with.",
+    input: z.object({}),
+    readOnly: true,
+    run: (_i, { userId }) => listUsers().filter((u) => u.id !== userId).map((u) => ({ id: u.id, name: u.name })),
+  }),
+  tool({
+    name: "list_changes",
+    title: "Recent changes (audit trail)",
+    description: "What changed in the user's data and who did it (the user, the assistant, Telegram or a partner on a shared account), newest first.",
+    input: z.object({ limit: z.number().int().min(1).max(500).default(50) }),
+    readOnly: true,
+    run: ({ limit }, { userId }) => listChanges(userId, limit).map((c) => ({ ...c, at: new Date(c.at).toISOString() })),
+  }),
+  tool({
+    name: "list_goals",
+    title: "Savings goals",
+    description:
+      "The user's goals: target amount and currency, optional date, the accounts that count (none = whole net worth), current progress and %, what's left, the monthly amount needed to arrive on the date, the pace used (planned monthly, or average savings) and the projected date, and whether it's on track.",
+    input: z.object({ includeArchived: z.boolean().default(false) }),
+    readOnly: true,
+    run: ({ includeArchived }, { userId }) => goalsSvc.listGoals(userId, { includeArchived }).map(({ history: _h, ...g }) => g),
+  }),
+  tool({
+    name: "save_goal",
+    title: "Add or update a goal",
+    description: "Add a goal (omit id) or change one: name, target and currency, optional targetDate, accountIds that hold it (empty = whole net worth), optional planned monthly contribution.",
+    input: goalsSvc.goalInputSchema.extend({ id: z.number().int().optional() }),
+    readOnly: false,
+    run: (i, { userId }) => {
+      const g = goalsSvc.saveGoal(userId, i);
+      invalidateSqlSandbox(userId);
+      return g;
+    },
+  }),
+  tool({
+    name: "delete_goal",
+    title: "Delete a goal",
+    description: "Delete a goal. Its accounts are untouched.",
+    input: z.object({ id: z.number().int() }),
+    readOnly: false,
+    run: ({ id }, { userId }) => {
+      goalsSvc.deleteGoal(userId, id);
+      return { deleted: id };
+    },
+  }),
+  tool({
+    name: "get_investment_analytics",
+    title: "Investment analytics",
+    description:
+      "Analytics of the portfolio held today, from daily prices in the base currency (exchange rates included): returns over 1M/3M/6M/YTD/1Y, annual volatility, max drawdown (peak, trough, recovery), Sharpe at 0% risk-free, best/worst day, % of up days, month-by-month returns, per-position weight, returns and 1-year change, allocation by type / currency / region (from the listing exchange) / account, and concentration (top position, top 5, effective number of positions). It describes current positions, not past trades.",
+    input: z.object({ days: z.number().int().min(30).max(1830).default(365) }),
+    readOnly: true,
+    run: ({ days }, { userId }) => {
+      const a = investmentAnalytics(userId, { days });
+      return { ...a, index: a.index.filter((_, i) => i % 7 === 0 || i === a.index.length - 1), drawdown: undefined, actual: undefined, holdings: a.holdings.map(({ spark: _s, ...h }) => h) };
+    },
+  }),
+  tool({
+    name: "list_recurring",
+    title: "Recurring payments",
+    description:
+      "Salary, rent, subscriptions and other scheduled money: each item (expected amount and currency, cadence, next date, last matched payment, last price change), suggestions detected from history waiting to be accepted, the next 30 days of expected payments (late = expected and not arrived), monthly totals in the base currency, and a cash forecast. Items are expectations matched against real transactions — they never create transactions on their own.",
+    input: z.object({ days: z.number().int().min(1).max(365).default(30) }),
+    readOnly: true,
+    run: ({ days }, { userId }) => {
+      const f = recurringSvc.forecastCash(userId, days);
+      return {
+        items: recurringSvc.listRecurring(userId, { status: ["active", "paused"] }),
+        suggestions: recurringSvc.listRecurring(userId, { status: ["suggested"] }),
+        upcoming: recurringSvc.upcoming(userId, days),
+        summary: recurringSvc.recurringSummary(userId),
+        attention: recurringSvc.recurringNudges(userId),
+        forecast: { currency: f.currency, endCents: f.points.at(-1)?.cents, lowestCents: f.low.cents, lowestOn: f.low.date },
+      };
+    },
+  }),
+  tool({
+    name: "detect_recurring",
+    title: "Detect recurring payments",
+    description:
+      "Scan the last 18 months for payments that repeat (same payee and account, regular interval, similar amount) and store them as suggestions. Accept one with save_recurring (status active) or dismiss it (status dismissed).",
+    input: z.object({}),
+    readOnly: false,
+    run: (_i, { userId }) => ({ suggested: recurringSvc.suggestRecurring(userId) }),
+  }),
+  tool({
+    name: "save_recurring",
+    title: "Add or update a recurring payment",
+    description:
+      "Add a recurring item (omit id) or change one (id): salary (+amount), rent or a subscription (−amount), with its cadence and next expected date. Use status 'active' to accept a suggestion, 'paused' or 'dismissed' to stop it. Statements are matched to it automatically; nothing is created on a schedule.",
+    input: recurringSvc.recurringInputSchema.partial().extend({ id: z.number().int().optional() }),
+    readOnly: false,
+    run: ({ id, ...i }, { userId }) => {
+      const r = id ? recurringSvc.updateRecurring(userId, id, i) : recurringSvc.createRecurring(userId, recurringSvc.recurringInputSchema.parse(i));
+      recurringSvc.reconcileRecurring(userId);
+      return r;
+    },
+  }),
+  tool({
+    name: "delete_recurring",
+    title: "Delete a recurring payment",
+    description: "Delete a recurring item. Transactions already matched to it stay, unlinked.",
+    input: z.object({ id: z.number().int() }),
+    readOnly: false,
+    run: ({ id }, { userId }) => {
+      recurringSvc.deleteRecurring(userId, id);
+      return { deleted: id };
+    },
+  }),
+  tool({
+    name: "record_recurring_payment",
+    title: "Record a recurring payment",
+    description:
+      "Write the transaction for a recurring item that no statement will bring (cash rent, an account you don't import). If a statement later contains the same payment (same account and amount, within 5 days), the import takes this row over instead of duplicating it.",
+    input: z.object({ id: z.number().int(), date: isoDate.optional(), amount: z.number().optional() }),
+    readOnly: false,
+    run: ({ id, date, amount }, { userId }) => {
+      const row = recurringSvc.recordOccurrence(userId, id, { date, amount });
+      invalidateSqlSandbox(userId);
+      return row;
+    },
   }),
   tool({
     name: "match_transfers",
@@ -527,10 +808,36 @@ export const TOOLS = [
     },
   }),
   tool({
+    name: "add_loan_event",
+    title: "Record an early repayment or a new rate",
+    description:
+      "For a loan with a schedule: record an early repayment (type prepayment, amount) or a renegotiated rate (type rate_change, ratePct) on a date. keep 'duration' keeps the end date and lowers the payment; keep 'payment' keeps the payment and ends the loan sooner. The balance, remaining interest and end date follow.",
+    input: z.object({
+      accountId: z.number().int(),
+      date: isoDate,
+      type: z.enum(["prepayment", "rate_change"]),
+      amount: z.number().positive().optional(),
+      ratePct: z.number().min(0).max(30).optional(),
+      keep: z.enum(["duration", "payment"]).default("duration"),
+    }),
+    readOnly: false,
+    run: ({ accountId, ...ev }, { userId }) => {
+      const acc = accountsSvc.getAccountRow(userId, accountId);
+      if (!acc.loanParams) throw new Error(`${acc.name} has no loan schedule.`);
+      const updated = accountsSvc.updateAccount(userId, accountId, { loanParams: { ...acc.loanParams, events: [...(acc.loanParams.events ?? []), ev] } });
+      invalidateSqlSandbox(userId);
+      return { account: updated.name, events: updated.loanParams?.events };
+    },
+  }),
+  tool({
     name: "update_account",
     title: "Update account",
-    description: "Change an account's name, institution, type, currency, ownership share, loan terms or notes.",
-    input: accountsSvc.accountInputSchema.partial().omit({ initialBalance: true }).extend({ accountId: z.number().int() }),
+    description:
+      "Change an account's name, institution, type, currency, ownership share, loan terms, country, company or notes. Changing the currency of an account with recorded balances needs currencyChange: 'relabel' (the currency was wrong, keep the numbers) or 'convert' (it really changed: each past balance is converted at its date's rate).",
+    input: accountsSvc.accountInputSchema
+      .partial()
+      .omit({ initialBalance: true })
+      .extend({ accountId: z.number().int(), currencyChange: z.enum(["relabel", "convert"]).optional() }),
     readOnly: false,
     run: ({ accountId, ...patch }, { userId }) => accountsSvc.updateAccount(userId, accountId, patch),
   }),

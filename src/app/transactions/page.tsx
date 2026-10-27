@@ -1,14 +1,16 @@
-import { ChevronLeft, ChevronRight, Tag, Upload } from "lucide-react";
+import Link from "next/link";
+import { ChevronLeft, ChevronRight, Repeat, Tag, Upload, X } from "lucide-react";
 import { countUncategorized, firstTransactionMonth, listTransactions, transactionTotals } from "@/server/services/transactions";
 import { listCategories, normalizePattern, suggestPattern } from "@/server/services/categories";
 import { listAccounts } from "@/server/services/accounts";
-import { today } from "@/server/services/settings";
+import { getSettings, today } from "@/server/services/settings";
 import { serverFormat } from "@/server/format";
 import { currentMonth, formatDate, isISODate, monthRange } from "@/lib/dates";
-import { Button, ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
+import { Badge, Button, ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
 import { ConfirmButton } from "@/components/accounts-ui";
 import { CategorizeProgress, CategoryCell, QuickAdd, TxFilters, TxProvider, type TxFilterValues } from "@/components/transactions-ui";
 import { deleteTransactionAction, matchTransfersAction } from "./actions";
+import { TransactionExtras } from "@/components/transaction-extras";
 import { findTransferPairs } from "@/server/services/transfers";
 import { requireUser } from "@/server/session";
 
@@ -51,6 +53,7 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
     q: one(sp.q)?.trim().slice(0, 100) || undefined,
   };
   let page = posInt(one(sp.page)) ?? 1;
+  const tag = one(sp.tag)?.trim().slice(0, 40);
 
   const query = {
     from: filters.from,
@@ -58,6 +61,7 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
     categoryId: filters.category === "none" ? ("none" as const) : filters.category ? Number(filters.category) : undefined,
     accountId: filters.account ? Number(filters.account) : undefined,
     search: filters.q,
+    tag: tag || undefined,
   };
   let { rows, total, currency: base } = listTransactions(uid, { ...query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
   if (rows.length === 0 && total > 0) {
@@ -74,13 +78,14 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
   const defaultAccount = activeAccounts.find((a) => a.type === "checking") ?? null;
   const t = today(uid);
   const first = firstTransactionMonth(uid);
-  const months = first ? monthRange(first, currentMonth()).reverse() : [];
+  const months = first ? monthRange(first, currentMonth(getSettings(uid).timezone)).reverse() : [];
   const f = serverFormat(uid);
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageHref = (p: number) => {
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(filters)) if (v) params.set(k, v);
+    if (tag) params.set("tag", tag);
     if (p > 1) params.set("page", String(p));
     const qs = params.toString();
     return `/transactions${qs ? `?${qs}` : ""}`;
@@ -112,6 +117,15 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
             </>
           }
         />
+
+        {tag && (
+          <p className="flex items-center gap-2 text-sm">
+            Showing <span className="rounded-full bg-surface-2 px-2 py-0.5 text-accent">#{tag}</span>
+            <Link href="/transactions" className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink">
+              <X size={12} /> clear
+            </Link>
+          </p>
+        )}
 
         {transferPairs.length > 0 && (
           <Card className="flex flex-wrap items-center justify-between gap-3 py-3">
@@ -220,7 +234,18 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
                       {r.accountName && <span className="md:hidden"> · {r.accountName}</span>}
                     </div>
                     <div className="col-start-1 row-start-1 min-w-0 md:col-start-2 md:pt-1.5">
-                      <div className="text-sm break-words text-ink">{r.description}</div>
+                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm break-words text-ink">
+                        <span>{r.payee ?? r.description}</span>
+                        {r.recurringId && <Repeat size={12} className="text-muted" aria-label="Recurring payment" />}
+                        {r.splitCount > 0 && <Badge>split {r.splitCount}</Badge>}
+                        {(r.tags ?? []).map((t) => (
+                          <Link key={t} href={`/transactions?tag=${encodeURIComponent(t)}`} className="rounded-full bg-surface-2 px-1.5 text-xs text-accent hover:underline">
+                            #{t}
+                          </Link>
+                        ))}
+                        <TransactionExtras id={r.id} amountCents={r.amountCents} currency={r.currency} tags={r.tags ?? []} categories={categories} />
+                      </div>
+                      {r.payee && <div className="text-xs break-words text-muted">{r.description}</div>}
                       {r.notes && <div className="text-xs break-words text-muted">{r.notes}</div>}
                     </div>
                     <div className="hidden truncate pt-1.5 text-sm text-ink-2 md:col-start-3 md:row-start-1 md:block">

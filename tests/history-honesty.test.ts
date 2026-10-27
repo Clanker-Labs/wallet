@@ -38,3 +38,22 @@ describe("history only shows what wallet knew", () => {
     expect(() => recordBalance(uid, { accountId: loan.id, balance: 150_000 })).toThrow(/amortization schedule/);
   });
 });
+
+describe("changing an account's currency", () => {
+  it("asks whether to relabel or convert, and converts each balance at its date", async () => {
+    vi.setSystemTime(new Date("2026-10-15T12:00:00Z"));
+    const uid = freshUser();
+    const { storeRates } = await import("@/server/services/fx");
+    const { updateAccount, getAccount } = await import("@/server/services/accounts");
+    storeRates({ date: "2026-01-01", perUsd: { USD: 1, EUR: 0.9 } });
+    storeRates({ date: "2026-06-01", perUsd: { USD: 1, EUR: 0.8 } });
+    const a = createAccount(uid, { name: "Savings", type: "savings", currency: "USD" });
+    recordBalance(uid, { accountId: a.id, balance: 1_000, date: "2026-02-01" });
+    recordBalance(uid, { accountId: a.id, balance: 2_000, date: "2026-07-01" });
+    expect(() => updateAccount(uid, a.id, { currency: "EUR" })).toThrow(/relabel/);
+    updateAccount(uid, a.id, { currency: "EUR", currencyChange: "convert" });
+    expect(getAccount(uid, a.id).snapshots.map((s) => s.balanceCents)).toEqual([900_00, 1_600_00]);
+    updateAccount(uid, a.id, { currency: "USD", currencyChange: "relabel" });
+    expect(getAccount(uid, a.id).snapshots.map((s) => s.balanceCents)).toEqual([900_00, 1_600_00]);
+  });
+});

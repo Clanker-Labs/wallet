@@ -1,8 +1,12 @@
 "use server";
 
+import { createBackup, restoreBackup } from "@/server/services/backup";
+import { importExport } from "@/server/services/export";
+import { audit } from "@/server/services/audit";
 import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
-import { setSetting, type AppSettings } from "@/server/services/settings";
+import { getSettings, setSetting, type AppSettings } from "@/server/services/settings";
+import { rescheduleReminders } from "@/server/services/reminders";
 import { deletePasskey, listPasskeys, renamePasskey } from "@/server/services/passkeys";
 import { ensureFreshRates, latestFxDate } from "@/server/services/fx";
 import { createTelegramLinkCode } from "@/server/services/telegram-link";
@@ -13,7 +17,8 @@ import {
   deleteCategory,
   deleteRule,
   updateCategory,
-  upsertRule,
+  saveRule,
+  type RuleInput,
 } from "@/server/services/categories";
 import {
   createConnection,
@@ -23,7 +28,7 @@ import {
   type SyncResult,
 } from "@/server/services/connections";
 import { invalidateSqlSandbox } from "@/server/agent/sql-sandbox";
-import { requireUid } from "@/server/session";
+import { requireUid, requireUser } from "@/server/session";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string; errors?: Record<string, string> };
 
@@ -46,6 +51,7 @@ export async function savePreferences(input: AppSettings): Promise<ActionResult>
     timezone: String(input.timezone ?? "").trim(),
   };
   const errors: Record<string, string> = {};
+  const timezoneBefore = getSettings(uid).timezone;
   for (const key of ["currency", "locale", "timezone"] as const) {
     if (!values[key]) errors[key] = "Required";
     else {
@@ -56,6 +62,8 @@ export async function savePreferences(input: AppSettings): Promise<ActionResult>
       }
     }
   }
+  // Reminders are "9:00 where you are": a new time zone moves them.
+  if (!errors.timezone && values.timezone !== timezoneBefore) rescheduleReminders(uid);
   refreshAll();
   if (Object.keys(errors).length) return { ok: false, error: "Some values weren't saved", errors };
   return { ok: true, message: "Preferences saved" };
@@ -94,11 +102,11 @@ export async function removeCategory(id: number): Promise<ActionResult> {
   return { ok: true, message: "Deleted" };
 }
 
-export async function addRule(input: { pattern: string; categoryId: number }): Promise<ActionResult> {
+export async function addRule(input: RuleInput): Promise<ActionResult> {
   const uid = await requireUid();
   if (!Number.isInteger(input.categoryId)) return { ok: false, error: "Pick a category" };
   try {
-    upsertRule(uid, input.pattern, input.categoryId);
+    saveRule(uid, input);
     refreshAll();
     return { ok: true, message: `Rule “${input.pattern.trim().toLowerCase()}” saved` };
   } catch (e) {
@@ -243,5 +251,54 @@ export async function disconnectBrokerAction(id: number): Promise<ActionResult> 
     return { ok: true, message: "Disconnected — the key is deleted, positions stay as manual holdings" };
   } catch (e) {
     return { ok: false, error: errorText(e) };
+  }
+}
+
+// ── Backups & import ─────────────────────────────────────────────────────
+
+async function requireOwner() {
+  const user = await requireUser();
+  if (user.role !== "owner") throw new Error("Only the owner can manage backups: they hold every user's data.");
+  return user;
+}
+
+export async function backupNowAction(): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    const b = createBackup("manual");
+    refreshAll();
+    return { ok: true, message: `Backed up (${Math.round(b.bytes / 1024)} KB)` };
+  } catch (e) {
+    return { ok: false, error: errorText(e) };
+  }
+}
+
+export async function restoreBackupAction(name: string): Promise<ActionResult> {
+  try {
+    const owner = await requireOwner();
+    const r = restoreBackup(name);
+    audit(owner.id, "backup", name, "restore", `Restored the backup ${name} (state before kept as ${r.safety})`);
+    invalidateSqlSandbox();
+    refreshAll();
+    return { ok: true, message: `Restored ${r.tables} tables from ${name}. The state before is kept as ${r.safety}.` };
+  } catch (e) {
+    return { ok: false, error: errorText(e) };
+  }
+}
+
+export async function importExportAction(fd: FormData): Promise<ActionResult> {
+  const uid = await requireUid();
+  try {
+    const file = fd.get("file");
+    if (!(file instanceof File)) return { ok: false, error: "Choose a wallet export (.json)." };
+    if (file.size > 50 * 1024 * 1024) return { ok: false, error: "That file is over 50 MB." };
+    const counts = importExport(uid, JSON.parse(await file.text()));
+    audit(uid, "import", null, "import", `Imported a wallet export: ${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(", ")}`);
+    invalidateSqlSandbox(uid);
+    refreshAll();
+    const n = (k: string) => counts[k] ?? 0;
+    return { ok: true, message: `Imported ${n("accounts")} accounts, ${n("transactions")} transactions, ${n("balance_snapshots")} balances.` };
+  } catch (e) {
+    return { ok: false, error: e instanceof SyntaxError ? "That file isn't valid JSON." : errorText(e) };
   }
 }

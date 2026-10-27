@@ -3,6 +3,7 @@ import { after } from "next/server";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
 import { GlobalDrop } from "@/components/global-drop";
+import { Pwa } from "@/components/pwa";
 import { FormatProvider } from "@/components/format";
 import { DEFAULT_SETTINGS, getSettings } from "@/server/services/settings";
 import { currentUser } from "@/server/session";
@@ -49,6 +50,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <FormatProvider value={{ currency, locale }}>
           <AppShell user={user ? { name: user.name } : null}>{children}</AppShell>
           {user && <GlobalDrop />}
+          <Pwa />
         </FormatProvider>
       </body>
     </html>

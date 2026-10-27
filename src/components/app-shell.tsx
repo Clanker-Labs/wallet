@@ -8,6 +8,7 @@ import {
   Bell,
   Bot,
   Briefcase,
+  Building2,
   Calculator,
   CandlestickChart,
   LayoutDashboard,
@@ -16,9 +17,12 @@ import {
   Moon,
   PiggyBank,
   ReceiptText,
+  Repeat,
+  Scale,
   Settings,
   ShieldCheck,
   Sun,
+  Target,
   X,
 } from "lucide-react";
 import { Wordmark } from "./brand";
@@ -29,8 +33,12 @@ const NAV = [
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/investments", label: "Investments", icon: CandlestickChart },
   { href: "/jobs", label: "Jobs", icon: Briefcase },
+  { href: "/companies", label: "Companies", icon: Building2 },
   { href: "/budgets", label: "Budgets", icon: PiggyBank },
+  { href: "/recurring", label: "Recurring", icon: Repeat },
+  { href: "/goals", label: "Goals", icon: Target },
   { href: "/transactions", label: "Transactions", icon: ReceiptText },
+  { href: "/tax", label: "Tax", icon: Scale },
   { href: "/simulations", label: "Simulations", icon: Calculator },
   { href: "/reminders", label: "Reminders", icon: Bell },
   { href: "/assistant", label: "Assistant", icon: Bot },
@@ -132,6 +140,9 @@ export function AppShell({ children, user = null }: { children: React.ReactNode;
 
   return (
     <div className="min-h-screen md:flex">
+      <a href="#main" className="sr-only z-50 rounded-lg bg-accent px-3 py-2 text-accent-ink focus:not-sr-only focus:fixed focus:top-3 focus:left-3">
+        Skip to content
+      </a>
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-border bg-surface px-3 py-5 md:flex">
         <Link href="/" className="mb-7 flex items-center px-2.5" aria-label="wallet — net worth">
           <Wordmark size={28} />
@@ -182,7 +193,9 @@ export function AppShell({ children, user = null }: { children: React.ReactNode;
         )}
       </div>
 
-      <main className="mx-auto w-full max-w-6xl min-w-0 px-4 py-6 md:px-8 md:py-8">{children}</main>
+      <main id="main" tabIndex={-1} className="page-enter mx-auto w-full max-w-6xl min-w-0 px-4 py-6 outline-none md:px-8 md:py-8" key={pathname}>
+        {children}
+      </main>
     </div>
   );
 }

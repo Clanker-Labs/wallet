@@ -2,15 +2,17 @@ import { and, desc, eq, gte, inArray, isNull, like, lte, sql, type SQL } from "d
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { db } from "@/server/db/client";
-import { accounts, categories, transactions } from "@/server/db/schema";
+import { accounts, categories, transactionSplits, transactions } from "@/server/db/schema";
 import { toCents } from "@/lib/money";
 import { addDays, isISODate } from "@/lib/dates";
 import type { ImportRow } from "@/lib/csv-import";
 import { currencySchema, getAccountRow } from "./accounts";
-import { listRules, matchCategory, normalizePattern, requireCategory, upsertRule } from "./categories";
+import { listRules, normalizePattern, requireCategory, ruleEffects, upsertRule } from "./categories";
 import { fxConverter } from "./fx";
 import { getSettings, today } from "./settings";
 import { matchTransfers } from "./transfers";
+import { reconcileRecurring } from "./recurring";
+import { audit } from "./audit";
 
 export const transactionInputSchema = z.object({
   date: z.string().refine(isISODate, "Expected YYYY-MM-DD").optional(),
@@ -31,6 +33,9 @@ export const transactionFilterSchema = z.object({
   /** A category id, or "none" for uncategorized. */
   categoryId: z.union([z.number().int(), z.literal("none")]).optional(),
   search: z.string().optional(),
+  /** Only transactions with this tag. */
+  tag: z.string().optional(),
+  ids: z.array(z.number().int()).max(1000).optional(),
   limit: z.number().int().min(1).max(1000).default(100),
   offset: z.number().int().min(0).default(0),
 });
@@ -55,9 +60,12 @@ export function addTransaction(uid: string, raw: TransactionInput) {
   if (input.categoryId) requireCategory(uid, input.categoryId);
   // Always, not only when the currency is looked up from it: the account must be the caller's.
   if (input.accountId) getAccountRow(uid, input.accountId);
-  const categoryId =
-    input.categoryId === undefined ? matchCategory(input.description, listRules(uid)) : input.categoryId;
-  return db()
+  const effects =
+    input.categoryId === undefined
+      ? ruleEffects({ description: input.description, amountCents: toCents(input.amount), accountId: input.accountId ?? null }, listRules(uid))
+      : null;
+  const categoryId = input.categoryId === undefined ? (effects?.categoryId ?? null) : input.categoryId;
+  const row = db()
     .insert(transactions)
     .values({
       userId: uid,
@@ -66,12 +74,17 @@ export function addTransaction(uid: string, raw: TransactionInput) {
       currency: input.currency ?? defaultCurrency(uid, input.accountId),
       description: input.description,
       categoryId: categoryId ?? null,
+      payee: effects?.payee ?? null,
+      tags: effects?.tags ?? null,
       accountId: input.accountId ?? null,
       notes: input.notes ?? null,
       source: input.source,
     })
     .returning()
     .get();
+  reconcileRecurring(uid);
+  audit(uid, "transaction", row.id, "add", `${row.description}: ${(row.amountCents / 100).toFixed(2)} ${row.currency} on ${row.date}`);
+  return row;
 }
 
 export function updateTransaction(uid: string, id: number, raw: Partial<TransactionInput>) {
@@ -91,7 +104,9 @@ export function updateTransaction(uid: string, id: number, raw: Partial<Transact
     patch.accountId = input.accountId ?? null;
   }
   if (input.notes !== undefined) patch.notes = input.notes ?? null;
-  return db().update(transactions).set(patch).where(eq(transactions.id, id)).returning().get();
+  const updated = db().update(transactions).set(patch).where(eq(transactions.id, id)).returning().get();
+  audit(uid, "transaction", id, "update", `Changed ${Object.keys(patch).join(", ")} of “${updated?.description}”`);
+  return updated;
 }
 
 export function deleteTransaction(uid: string, id: number) {
@@ -99,6 +114,7 @@ export function deleteTransaction(uid: string, id: number) {
     .delete(transactions)
     .where(and(eq(transactions.id, id), eq(transactions.userId, uid)))
     .run();
+  audit(uid, "transaction", id, "delete", `Deleted transaction ${id}`);
 }
 
 function filterWhere(uid: string, f: z.output<typeof transactionFilterSchema>) {
@@ -108,7 +124,13 @@ function filterWhere(uid: string, f: z.output<typeof transactionFilterSchema>) {
   if (f.accountId) where.push(eq(transactions.accountId, f.accountId));
   if (f.categoryId === "none") where.push(isNull(transactions.categoryId));
   else if (f.categoryId) where.push(eq(transactions.categoryId, f.categoryId));
-  if (f.search) where.push(like(transactions.description, `%${f.search}%`));
+  if (f.search) {
+    // Literal text: % and _ in a search box mean themselves, not wildcards.
+    const q = `%${f.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    where.push(sql`(${transactions.description} LIKE ${q} ESCAPE '\\' OR ${transactions.payee} LIKE ${q} ESCAPE '\\')`);
+  }
+  if (f.ids) where.push(inArray(transactions.id, f.ids.length ? f.ids : [-1]));
+  if (f.tag) where.push(sql`EXISTS (SELECT 1 FROM json_each(${transactions.tags}) WHERE value = ${f.tag.replace(/^#/, "").toLowerCase()})`);
   return and(...where);
 }
 
@@ -132,6 +154,10 @@ export function listTransactions(uid: string, raw: TransactionFilter = {}) {
       categoryKind: categories.kind,
       accountId: transactions.accountId,
       accountName: accounts.name,
+      recurringId: transactions.recurringId,
+      payee: transactions.payee,
+      tags: transactions.tags,
+      splitCount: sql<number>`(SELECT count(*) FROM transaction_splits s WHERE s.transaction_id = ${transactions.id})`,
     })
     .from(transactions)
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
@@ -257,18 +283,41 @@ export function importTransactions(
   );
   const seen = new Map<string, number>();
   const stmt = db().$client.prepare(
-    `INSERT OR IGNORE INTO transactions (user_id, account_id, date, amount_cents, currency, description, category_id, import_hash, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO transactions (user_id, account_id, date, amount_cents, currency, description, category_id, import_hash, source, payee, tags)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  // A payment typed in by hand (or recorded from a recurring item) that the
+  // statement now brings: same account, same amount, within a few days.
+  // The statement row takes it over instead of adding a second one.
+  const adoptable = db().$client.prepare(
+    `SELECT id FROM transactions
+     WHERE user_id = ? AND account_id = ? AND amount_cents = ? AND import_hash IS NULL AND source != 'csv'
+       AND date BETWEEN date(?, '-5 days') AND date(?, '+5 days')
+     ORDER BY abs(julianday(date) - julianday(?)) LIMIT 1`,
+  );
+  const adopt = db().$client.prepare(
+    "UPDATE transactions SET date = ?, description = ?, import_hash = ?, source = ? WHERE id = ?",
+  );
+  const hashTaken = db().$client.prepare("SELECT 1 FROM transactions WHERE user_id = ? AND import_hash = ?");
   let inserted = 0;
   let categorized = 0;
+  let adopted = 0;
   db().$client.transaction(() => {
     for (const row of rows) {
       const key = `${row.date}|${toCents(row.amount)}|${row.description.toLowerCase()}`;
       const occurrence = seen.get(key) ?? 0;
       seen.set(key, occurrence + 1);
-      const categoryId =
-        row.categoryId && ownCategories.has(row.categoryId) ? row.categoryId : matchCategory(row.description, rules);
+      if (accountId) {
+        const hash = importHash(accountId, row, occurrence);
+        const existing = !hashTaken.get(uid, hash) && (adoptable.get(uid, accountId, toCents(row.amount), row.date, row.date, row.date) as { id: number } | undefined);
+        if (existing) {
+          adopt.run(row.date, row.description, hash, opts.source ?? "csv", existing.id);
+          adopted++;
+          continue;
+        }
+      }
+      const effects = ruleEffects({ description: row.description, amountCents: toCents(row.amount), accountId }, rules);
+      const categoryId = row.categoryId && ownCategories.has(row.categoryId) ? row.categoryId : (effects?.categoryId ?? null);
       const res = stmt.run(
         uid,
         accountId,
@@ -279,6 +328,8 @@ export function importTransactions(
         categoryId,
         importHash(accountId, row, occurrence),
         opts.source ?? "csv",
+        effects?.payee ?? null,
+        effects?.tags ? JSON.stringify(effects.tags) : null,
       );
       if (res.changes) {
         inserted++;
@@ -292,5 +343,88 @@ export function importTransactions(
     const dates = rows.map((r) => r.date).sort();
     transfers = matchTransfers(uid, { from: addDays(dates[0], -3), to: addDays(dates.at(-1)!, 3) }).matched;
   }
-  return { inserted, duplicates: rows.length - inserted, categorized, ...(transfers ? { transfers } : {}) };
+  if (inserted || adopted) reconcileRecurring(uid);
+  if (inserted || adopted) audit(uid, "transaction", accountId, "import", `Imported ${inserted} transaction${inserted === 1 ? "" : "s"}${adopted ? `, ${adopted} matched to ones entered by hand` : ""} (${opts.source ?? "csv"})`);
+  return {
+    inserted,
+    duplicates: rows.length - inserted - adopted,
+    categorized,
+    ...(adopted ? { adopted } : {}),
+    ...(transfers ? { transfers } : {}),
+  };
+}
+
+// ── Splits & tags ──────────────────────────────────────────────────────────
+
+export const splitInputSchema = z.array(
+  z.object({ categoryId: z.number().int().nullable(), amount: z.number(), note: z.string().max(200).nullish() }),
+);
+
+/**
+ * Split one payment over several categories. The parts must add up to the
+ * transaction's amount; budgets then count the parts. An empty list removes
+ * the split. The transaction keeps the largest part's category for display.
+ */
+export function setSplits(uid: string, id: number, raw: z.input<typeof splitInputSchema>) {
+  const tx = getTransactionRow(uid, id);
+  const parts = splitInputSchema.parse(raw);
+  for (const p of parts) if (p.categoryId) requireCategory(uid, p.categoryId);
+  db().transaction((t) => {
+    t.delete(transactionSplits).where(eq(transactionSplits.transactionId, id)).run();
+    if (!parts.length) return;
+    if (parts.length < 2) throw new Error("A split needs at least two parts.");
+    const cents = parts.map((p) => toCents(p.amount));
+    const total = cents.reduce((a, b) => a + b, 0);
+    if (total !== tx.amountCents)
+      throw new Error(`The parts add up to ${(total / 100).toFixed(2)} but the payment is ${(tx.amountCents / 100).toFixed(2)} ${tx.currency}.`);
+    if (cents.some((c) => Math.sign(c) !== Math.sign(tx.amountCents))) throw new Error("Every part must have the payment's sign.");
+    t.insert(transactionSplits)
+      .values(parts.map((p, i) => ({ transactionId: id, userId: uid, categoryId: p.categoryId, amountCents: cents[i], note: p.note ?? null })))
+      .run();
+    audit(uid, "transaction", id, "split", `Split “${tx.description}” in ${parts.length}`);
+    const largest = parts[cents.map(Math.abs).indexOf(Math.max(...cents.map(Math.abs)))];
+    t.update(transactions).set({ categoryId: largest.categoryId }).where(eq(transactions.id, id)).run();
+  });
+  return listSplits(uid, id);
+}
+
+export function listSplits(uid: string, id: number) {
+  getTransactionRow(uid, id);
+  return db()
+    .select({ id: transactionSplits.id, categoryId: transactionSplits.categoryId, categoryName: categories.name, amountCents: transactionSplits.amountCents, note: transactionSplits.note })
+    .from(transactionSplits)
+    .leftJoin(categories, eq(categories.id, transactionSplits.categoryId))
+    .where(eq(transactionSplits.transactionId, id))
+    .all();
+}
+
+const cleanTag = (t: string) => t.trim().replace(/^#/, "").toLowerCase().replace(/\s+/g, "-").slice(0, 40);
+
+/** Add and/or remove tags on transactions. */
+export function tagTransactions(uid: string, ids: number[], opts: { add?: string[]; remove?: string[] }) {
+  const add = (opts.add ?? []).map(cleanTag).filter(Boolean);
+  const remove = new Set((opts.remove ?? []).map(cleanTag));
+  if (!ids.length) return { updated: 0 };
+  const rows = db()
+    .select({ id: transactions.id, tags: transactions.tags })
+    .from(transactions)
+    .where(and(eq(transactions.userId, uid), inArray(transactions.id, ids)))
+    .all();
+  const stmt = db().$client.prepare("UPDATE transactions SET tags = ? WHERE id = ?");
+  db().$client.transaction(() => {
+    for (const r of rows) {
+      const next = [...new Set([...(r.tags ?? []), ...add])].filter((t) => !remove.has(t));
+      stmt.run(next.length ? JSON.stringify(next) : null, r.id);
+    }
+  })();
+  return { updated: rows.length };
+}
+
+/** Every tag in use, most used first. */
+export function listTags(uid: string): { tag: string; count: number }[] {
+  return db()
+    .$client.prepare(
+      "SELECT j.value AS tag, count(*) AS count FROM transactions t, json_each(t.tags) j WHERE t.user_id = ? GROUP BY j.value ORDER BY count DESC, tag",
+    )
+    .all(uid) as { tag: string; count: number }[];
 }

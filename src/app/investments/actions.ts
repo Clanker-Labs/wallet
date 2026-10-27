@@ -6,6 +6,7 @@ import { deleteHolding, listHoldings, updateHolding, upsertHolding, type Holding
 import { refreshPrices, searchSymbols, type SymbolMatch } from "@/server/services/prices";
 import { snapshotHoldingAccounts } from "@/server/services/accounts";
 import { HOLDING_TYPES, type HoldingType } from "@/lib/domain";
+import { isISODate } from "@/lib/dates";
 import { requireUid } from "@/server/session";
 
 export interface HoldingActionState {
@@ -125,6 +126,7 @@ function parseHoldingForm(fd: FormData): { input?: HoldingInput; error?: string 
       // The form asks for the total paid; the service stores the average cost per unit.
       costBasis: totalCost === undefined ? null : totalCost / quantity,
       manualPrice: manualPrice ?? null,
+      purchaseDate: isISODate(str(fd, "purchaseDate")) ? str(fd, "purchaseDate") : null,
     },
   };
 }

@@ -8,8 +8,9 @@ import {
   sqliteTable,
   text,
   uniqueIndex,
+  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
-import type { AccountType, AssetClass, HoldingType, LoanParams } from "@/lib/domain";
+import type { AccountType, AssetClass, CompanyParams, HoldingType, LoanParams } from "@/lib/domain";
 import type { GratuityParams } from "@/lib/finance/gratuity";
 
 const createdAt = () =>
@@ -110,6 +111,12 @@ export const accounts = sqliteTable(
     loanParams: text("loan_params", { mode: "json" }).$type<LoanParams>(),
     /** A job: the balance is the end-of-service gratuity accrued under its country's law. */
     gratuityParams: text("gratuity_params", { mode: "json" }).$type<GratuityParams>(),
+    /** A company you own (type "company"): how it is valued, where it is taxed. */
+    companyParams: text("company_params", { mode: "json" }).$type<CompanyParams>(),
+    /** An account that belongs to a company (its bank, brokerage, loan): counted through the company. */
+    companyId: integer("company_id").references((): AnySQLiteColumn => accounts.id, { onDelete: "set null" }),
+    /** ISO country the account is in (a French flat: FR). Drives where its income is taxed. */
+    country: text("country"),
     notes: text("notes"),
     createdAt: createdAt(),
   },
@@ -155,6 +162,8 @@ export const holdings = sqliteTable(
     currency: text("currency").notNull().default("USD"),
     /** Average cost per unit, in `currency`. */
     costBasis: real("cost_basis"),
+    /** When it was bought (on average): its cost in your currency uses that day's exchange rate. */
+    purchaseDate: text("purchase_date"),
     /** Price per unit used when there is no market symbol (or to override it). */
     manualPrice: real("manual_price"),
     /** Set when a broker connection owns this position: the next sync overwrites it. */
@@ -254,6 +263,12 @@ export const transactions = sqliteTable(
     notes: text("notes"),
     /** Dedupe key for imported rows (unique per user). */
     importHash: text("import_hash"),
+    /** Display name (from a rule or the user); the bank label in `description` is kept for matching. */
+    payee: text("payee"),
+    /** Free tags, e.g. ["trip-japan", "reimbursable"]. */
+    tags: text("tags", { mode: "json" }).$type<string[]>(),
+    /** The recurring item (salary, rent, a subscription) this payment fulfils. */
+    recurringId: integer("recurring_id").references((): AnySQLiteColumn => recurring.id, { onDelete: "set null" }),
     source: text("source").notNull().default("manual"),
     createdAt: createdAt(),
   },
@@ -274,9 +289,19 @@ export const categoryRules = sqliteTable(
     categoryId: integer("category_id")
       .notNull()
       .references(() => categories.id, { onDelete: "cascade" }),
+    /** How `pattern` is compared with the bank label. */
+    matchType: text("match_type").$type<"contains" | "starts" | "exact">().notNull().default("contains"),
+    /** Conditions (all optional): only this account, only money in/out, an amount range (absolute, in the row's currency). */
+    accountId: integer("account_id").references(() => accounts.id, { onDelete: "cascade" }),
+    direction: text("direction").$type<"in" | "out">(),
+    minAmountCents: integer("min_amount_cents"),
+    maxAmountCents: integer("max_amount_cents"),
+    /** Extra actions: show the payee under this name, add this tag. */
+    renameTo: text("rename_to"),
+    addTag: text("add_tag"),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("category_rules_user_pattern").on(t.userId, t.pattern)],
+  (t) => [index("category_rules_user").on(t.userId)],
 );
 
 /**
@@ -325,6 +350,187 @@ export const reminders = sqliteTable(
   },
   (t) => [index("reminders_user").on(t.userId)],
 );
+
+/**
+ * A company's revenue and expenses for one month, entered by hand — for when
+ * its bank isn't imported, or for figures that never touch a bank (an
+ * accountant's numbers). Added to whatever its accounts' transactions show.
+ */
+export const companyFinancials = sqliteTable(
+  "company_financials",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: userId(),
+    companyId: integer("company_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    /** YYYY-MM */
+    month: text("month").notNull(),
+    /** In the company's currency, both positive. */
+    revenueCents: integer("revenue_cents").notNull().default(0),
+    expensesCents: integer("expenses_cents").notNull().default(0),
+    note: text("note"),
+  },
+  (t) => [uniqueIndex("company_financials_month").on(t.companyId, t.month)],
+);
+
+/**
+ * Something to save for: an amount by a date (a flat deposit, a car), or a
+ * level of net worth. Progress is what the linked accounts hold (or the whole
+ * net worth when none are linked), in the goal's currency.
+ */
+export const goals = sqliteTable(
+  "goals",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: userId(),
+    name: text("name").notNull(),
+    icon: text("icon"),
+    targetCents: integer("target_cents").notNull(),
+    currency: text("currency").notNull(),
+    targetDate: text("target_date"),
+    /** Accounts whose balances count towards it; empty = the whole net worth. */
+    accountIds: text("account_ids", { mode: "json" }).$type<number[]>().notNull().default(sql`'[]'`),
+    /** What you plan to put in each month; empty = use your average savings. */
+    monthlyCents: integer("monthly_cents"),
+    archivedAt: text("archived_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("goals_user").on(t.userId)],
+);
+
+/**
+ * An account shared with another member of this wallet (a partner): it shows
+ * in their accounts and net worth at `sharePct` of it. "edit" lets them record
+ * balances; its terms, positions and history stay the owner's to change.
+ */
+export const accountShares = sqliteTable(
+  "account_shares",
+  {
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    userId: userId(),
+    role: text("role").$type<"view" | "edit">().notNull().default("view"),
+    /** Their share of the account for their net worth (0–100). */
+    sharePct: real("share_pct").notNull().default(50),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.userId] }), index("account_shares_user").on(t.userId)],
+);
+
+/** Who changed what, when: one row per change made through the app, the assistant or the API. */
+export const changes = sqliteTable(
+  "changes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** Whose data it is. */
+    userId: userId(),
+    /** Who did it (a partner editing a shared account, or the user themselves). */
+    actorId: text("actor_id"),
+    at: integer("at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    entity: text("entity").notNull(),
+    entityId: text("entity_id"),
+    action: text("action").notNull(),
+    summary: text("summary").notNull(),
+  },
+  (t) => [index("changes_user_at").on(t.userId, t.at)],
+);
+
+/** Time spent in a country (a trip, a stay), for the tax-residency day count. */
+export const presence = sqliteTable(
+  "presence",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: userId(),
+    /** ISO 3166 alpha-2 */
+    country: text("country").notNull(),
+    fromDate: text("from_date").notNull(),
+    /** Inclusive. */
+    toDate: text("to_date").notNull(),
+    note: text("note"),
+  },
+  (t) => [index("presence_user").on(t.userId)],
+);
+
+/**
+ * Answers the tax view needs and can't infer, per tax year (year 0 = every
+ * year): residence, French family parts, rental regime, a figure to use
+ * instead of the computed one. Keys are documented in services/tax.ts.
+ */
+export const taxInputs = sqliteTable(
+  "tax_inputs",
+  {
+    userId: userId(),
+    year: integer("year").notNull(),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.year, t.key] })],
+);
+
+/**
+ * One payment over several categories (a supermarket receipt that is half
+ * groceries, half household). Splits sum to the transaction's amount; budgets
+ * and cash flow read the splits instead of the transaction's own category.
+ */
+export const transactionSplits = sqliteTable(
+  "transaction_splits",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    transactionId: integer("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    userId: userId(),
+    categoryId: integer("category_id").references(() => categories.id, { onDelete: "set null" }),
+    /** Signed like the transaction, in its currency. */
+    amountCents: integer("amount_cents").notNull(),
+    note: text("note"),
+  },
+  (t) => [index("transaction_splits_tx").on(t.transactionId)],
+);
+
+/**
+ * Something that happens on a schedule: salary, rent, a subscription. It is an
+ * EXPECTATION, never a transaction: statements bring the real payment, which
+ * is matched to it (transactions.recurringId), so nothing is ever counted
+ * twice. Detected from history (status "suggested" until accepted) or added
+ * by hand.
+ */
+export const recurring = sqliteTable(
+  "recurring",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: userId(),
+    name: text("name").notNull(),
+    /** Lowercase text the bank label contains ("netflix", "salary acme"). */
+    pattern: text("pattern").notNull(),
+    accountId: integer("account_id").references(() => accounts.id, { onDelete: "set null" }),
+    categoryId: integer("category_id").references(() => categories.id, { onDelete: "set null" }),
+    /** Expected amount, signed like a transaction (negative = money out), in `currency`. */
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    cadence: text("cadence").$type<RecurringCadence>().notNull(),
+    /** The next date it is expected (YYYY-MM-DD). */
+    nextDate: text("next_date").notNull(),
+    /** How far the amount may differ and still be this payment (%). */
+    tolerancePct: real("tolerance_pct").notNull().default(10),
+    /** How many days early or late it may arrive. */
+    windowDays: integer("window_days").notNull().default(5),
+    status: text("status").$type<"active" | "suggested" | "paused" | "dismissed">().notNull().default("active"),
+    source: text("source").$type<"detected" | "manual">().notNull().default("manual"),
+    lastMatchedDate: text("last_matched_date"),
+    lastAmountCents: integer("last_amount_cents"),
+    /** Last change of amount between two matched payments (%), e.g. a price rise. */
+    lastChangePct: real("last_change_pct"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("recurring_user").on(t.userId)],
+);
+
+export type RecurringCadence = "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
 
 export type ReminderKind = "custom" | "balance_update" | "statement" | "monthly_report";
 export type ReminderFrequency = "once" | "weekly" | "monthly" | "quarterly" | "yearly";

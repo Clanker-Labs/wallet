@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Archive, ArrowLeft, ArchiveRestore, ArrowRight, Plus } from "lucide-react";
-import { balanceOnDate, getAccount, listAccounts } from "@/server/services/accounts";
+import { balanceOnDate, getAccount, listAccounts, listShares } from "@/server/services/accounts";
+import { listUsers } from "@/server/services/users";
+import { AccountSharing } from "@/components/account-sharing";
 import { today } from "@/server/services/settings";
 import { serverFormat } from "@/server/format";
 import {
@@ -13,7 +15,8 @@ import {
   isLiability,
 } from "@/lib/domain";
 import { addDays, addMonths, endOfMonth, formatDate, formatMonth, monthRange } from "@/lib/dates";
-import { monthlyPayment, paymentsMade } from "@/lib/finance/loan";
+import { loanEndDate, loanSchedule, monthlyPayment, paymentOn, paymentsMade } from "@/lib/finance/loan";
+import { LoanEvents } from "@/components/loan-events";
 import { Badge, Button, ButtonLink, Card, CardHeader, Delta, SeriesDot, Stat } from "@/components/ui";
 import { FormatProvider } from "@/components/format";
 import {
@@ -70,6 +73,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const showAll = (await searchParams).all === "1";
   if (!data) notFound();
   const { account: a, snapshots } = data;
+  /** Yours, or shared with you by another member. */
+  const mine = a.userId === uid;
   const f = serverFormat(uid);
   const t = today(uid);
   const liability = isLiability(a.assetClass);
@@ -110,15 +115,23 @@ export default async function AccountPage({ params, searchParams }: Props) {
 
   const loanStats = loan
     ? (() => {
-        const pmt = monthlyPayment(loan.principal, loan.annualRatePct, loan.durationMonths);
+        // The real schedule: early repayments and renegotiated rates included.
+        const payments = loanSchedule(loan).filter((r) => r.kind === "payment");
+        const pmt = loan.events?.length ? paymentOn(loan, t) || (payments[0]?.payment ?? 0) : monthlyPayment(loan.principal, loan.annualRatePct, loan.durationMonths);
         const insurance = ((loan.insuranceRatePct ?? 0) / 100 / 12) * loan.principal;
-        const made = paymentsMade(loan, t);
+        const made = loan.events?.length ? payments.filter((r) => r.date <= t).length : paymentsMade(loan, t);
+        const total = loan.events?.length ? payments.length : loan.durationMonths;
+        const end = loan.events?.length ? loanEndDate(loan) : null;
+        const rateNow = payments.find((r) => r.date >= t)?.ratePct ?? loan.annualRatePct;
         return {
           monthlyCents: Math.round((pmt + insurance) * 100),
           insuranceCents: Math.round(insurance * 100),
           made,
-          left: loan.durationMonths - made,
-          endMonth: addMonths(loan.startDate.slice(0, 7), loan.durationMonths - 1),
+          total,
+          left: total - made,
+          rateNow,
+          interestLeftCents: Math.round(payments.filter((r) => r.date > t).reduce((s, r) => s + r.interest, 0) * 100),
+          endMonth: end ? end.slice(0, 7) : addMonths(loan.startDate.slice(0, 7), loan.durationMonths - 1),
         };
       })()
     : null;
@@ -134,6 +147,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
     linkedAccountId: a.linkedAccountId,
     loanParams: a.loanParams,
     notes: a.notes,
+    companyId: a.companyId,
+    country: a.country,
   };
 
   return (
@@ -209,7 +224,23 @@ export default async function AccountPage({ params, searchParams }: Props) {
       )}
 
       {/* Primary action */}
-      {job ? (
+      {a.companyParams && a.companyParams.valuation !== "manual" ? (
+        <Card>
+          <CardHeader
+            title="Company"
+            subtitle={
+              a.companyParams.valuation === "book"
+                ? "Its value is what its own accounts hold, minus its debts — nothing to record here."
+                : "Its value comes from its last 12 months of revenue or profit — nothing to record here."
+            }
+            action={
+              <ButtonLink href="/companies" size="sm" variant="ghost">
+                Companies <ArrowRight size={14} />
+              </ButtonLink>
+            }
+          />
+        </Card>
+      ) : job ? (
         <Card>
           <CardHeader
             title="Job"
@@ -232,7 +263,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
         <Card>
           <CardHeader
             title="Loan"
-            subtitle="The balance updates itself from the amortization schedule — nothing to record."
+            subtitle="The balance follows the amortization schedule. Repaid early or renegotiated the rate? Add it below and the schedule follows."
           />
           <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
             <Stat
@@ -240,9 +271,16 @@ export default async function AccountPage({ params, searchParams }: Props) {
               value={native(loanStats.monthlyCents)}
               delta={loanStats.insuranceCents > 0 ? <span className="text-muted">incl. {native(loanStats.insuranceCents)} insurance</span> : undefined}
             />
-            <Stat label="Borrowed" value={native(Math.round(loan.principal * 100), { whole: true })} delta={<span className="text-muted">at {loan.annualRatePct}%</span>} />
-            <Stat label="Payments made" value={`${loanStats.made} / ${loan.durationMonths}`} delta={<span className="text-muted">{loanStats.left} to go</span>} />
+            <Stat
+              label="Borrowed"
+              value={native(Math.round(loan.principal * 100), { whole: true })}
+              delta={<span className="text-muted">at {loan.annualRatePct}%{loanStats.rateNow !== loan.annualRatePct && `, now ${loanStats.rateNow}%`}</span>}
+            />
+            <Stat label="Payments made" value={`${loanStats.made} / ${loanStats.total}`} delta={<span className="text-muted">{loanStats.left} to go · {native(loanStats.interestLeftCents, { whole: true })} interest left</span>} />
             <Stat label="Paid off" value={formatMonth(loanStats.endMonth)} delta={<span className="text-muted">first payment {formatDate(loan.startDate)}</span>} />
+          </div>
+          <div className="mt-5 border-t border-border pt-4">
+            <LoanEvents accountId={a.id} events={loan.events ?? []} currency={a.currency} today={t} />
           </div>
         </Card>
       ) : a.valuedByHoldings ? (
@@ -303,6 +341,12 @@ export default async function AccountPage({ params, searchParams }: Props) {
       ) : a.archivedAt ? (
         <Card>
           <p className="text-sm text-ink-2">This account is closed. Unarchive it (bottom of the page) to record new balances.</p>
+        </Card>
+      ) : !mine && a.shareRole !== "edit" ? (
+        <Card>
+          <p className="text-sm text-ink-2">
+            {a.sharedBy} shared this account with you to view. Your share, {+a.ownershipPct.toFixed(2)}%, counts in your net worth.
+          </p>
         </Card>
       ) : (
         <Card>
@@ -390,17 +434,41 @@ export default async function AccountPage({ params, searchParams }: Props) {
         </Card>
       )}
 
+      {/* Shared: with whom (owner), or by whom (partner) */}
+      {mine ? (
+        !a.companyId && (
+          <Card>
+            <CardHeader title="Shared with" subtitle="A partner on this wallet sees it in their accounts and net worth, at their share" />
+            <AccountSharing
+              accountId={a.id}
+              shares={listShares(uid, a.id)}
+              members={listUsers().filter((u) => u.id !== uid).map((u) => ({ id: u.id, name: u.name }))}
+            />
+          </Card>
+        )
+      ) : (
+        <p className="text-sm text-muted">
+          Shared by {a.sharedBy} · your share {+a.ownershipPct.toFixed(2)}% · {a.shareRole === "edit" ? "you can record balances" : "view only"}
+        </p>
+      )}
+
       {/* Edit (a job's terms are edited on the Jobs page) */}
-      {!job && <Card className="py-3">
+      {!job && mine && <Card className="py-3">
         <Disclosure summaryClassName="py-1" summary={<span className="text-sm font-semibold">Edit details</span>}>
           <div className="pt-4 pb-2">
-            <AccountForm account={formValues} properties={properties} currencies={currencies} baseCurrency={f.currency} />
+            <AccountForm
+              account={formValues}
+              properties={properties}
+              currencies={currencies}
+              baseCurrency={f.currency}
+              companies={others.filter((x) => x.companyParams && !x.archivedAt).map((x) => ({ id: x.id, name: x.name }))}
+            />
           </div>
         </Disclosure>
       </Card>}
 
       {/* Archive / delete */}
-      <Card>
+      {mine && <Card>
         <CardHeader title="Close or delete" />
         <div className="grid gap-6 sm:grid-cols-2">
           <div className="space-y-3">
@@ -433,7 +501,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
             <DeleteAccountForm id={a.id} name={a.name} snapshotCount={snapshots.length} />
           </div>
         </div>
-      </Card>
+      </Card>}
     </div>
   );
 }

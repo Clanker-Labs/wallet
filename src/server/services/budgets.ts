@@ -1,13 +1,14 @@
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { db } from "@/server/db/client";
-import { budgets, categories, transactions } from "@/server/db/schema";
+import { budgets, categories } from "@/server/db/schema";
 import { addMonths, monthBounds, monthRange } from "@/lib/dates";
 import { toCents } from "@/lib/money";
 import { requireCategory } from "./categories";
 import { fxConverter, type FxConverter } from "./fx";
 import { isCurrencyCode, normalizeCurrency } from "@/lib/domain";
 import { getSettings, today } from "./settings";
+import { audit } from "./audit";
 
 export type BudgetLineStatus = "ok" | "ahead_of_pace" | "over" | "unbudgeted";
 
@@ -75,8 +76,10 @@ export function setBudget(uid: string, categoryId: number, amount: number | null
   requireCategory(uid, categoryId);
   if (!amount || amount <= 0) {
     db().delete(budgets).where(and(eq(budgets.userId, uid), eq(budgets.categoryId, categoryId))).run();
+    audit(uid, "budget", categoryId, "delete", `Removed the budget of category ${categoryId}`);
     return null;
   }
+  audit(uid, "budget", categoryId, "set", `Budget of category ${categoryId}: ${amount}${currency ? ` ${currency}` : ""} a month`);
   const base = getSettings(uid).currency;
   let cur: string | null | undefined = currency === undefined ? undefined : currency ? normalizeCurrency(currency) : null;
   if (cur && !isCurrencyCode(cur)) throw new Error(`Unknown currency "${currency}"`);
@@ -115,25 +118,31 @@ interface CategoryTotal {
   count: number;
 }
 
-/** Money in / out per category, transaction currency and day, unconverted. */
+/**
+ * Money in / out per category, transaction currency and day, unconverted.
+ * A split payment contributes one row per part, each under its own category.
+ */
 function rawTotals(uid: string, from: string, to: string): RawTotal[] {
   return db()
-    .select({
-      date: transactions.date,
-      currency: transactions.currency,
-      categoryId: transactions.categoryId,
-      kind: categories.kind,
-      name: categories.name,
-      icon: categories.icon,
-      inCents: sql<number>`coalesce(sum(case when ${transactions.amountCents} > 0 then ${transactions.amountCents} else 0 end), 0)`,
-      outCents: sql<number>`coalesce(sum(case when ${transactions.amountCents} < 0 then -${transactions.amountCents} else 0 end), 0)`,
-      count: sql<number>`count(*)`,
-    })
-    .from(transactions)
-    .leftJoin(categories, eq(categories.id, transactions.categoryId))
-    .where(and(eq(transactions.userId, uid), gte(transactions.date, from), lte(transactions.date, to)))
-    .groupBy(transactions.categoryId, transactions.currency, transactions.date)
-    .all();
+    .$client.prepare(
+      `SELECT t.date AS date, t.currency AS currency, c.id AS categoryId, c.kind AS kind, c.name AS name, c.icon AS icon,
+              coalesce(sum(CASE WHEN p.amount > 0 THEN p.amount ELSE 0 END), 0) AS inCents,
+              coalesce(sum(CASE WHEN p.amount < 0 THEN -p.amount ELSE 0 END), 0) AS outCents,
+              count(DISTINCT t.id) AS count
+       FROM transactions t
+       JOIN (
+         SELECT t2.id AS tx, t2.category_id AS cat, t2.amount_cents AS amount FROM transactions t2
+           WHERE t2.user_id = @uid AND t2.date BETWEEN @from AND @to
+             AND NOT EXISTS (SELECT 1 FROM transaction_splits s WHERE s.transaction_id = t2.id)
+         UNION ALL
+         SELECT s.transaction_id, s.category_id, s.amount_cents FROM transaction_splits s
+           JOIN transactions t3 ON t3.id = s.transaction_id
+           WHERE t3.user_id = @uid AND t3.date BETWEEN @from AND @to
+       ) p ON p.tx = t.id
+       LEFT JOIN categories c ON c.id = p.cat
+       GROUP BY c.id, t.currency, t.date`,
+    )
+    .all({ uid, from, to }) as RawTotal[];
 }
 
 /**

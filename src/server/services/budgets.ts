@@ -8,6 +8,7 @@ import { requireCategory } from "./categories";
 import { fxConverter, type FxConverter } from "./fx";
 import { isCurrencyCode, normalizeCurrency } from "@/lib/domain";
 import { getSettings, today } from "./settings";
+import { audit } from "./audit";
 
 export type BudgetLineStatus = "ok" | "ahead_of_pace" | "over" | "unbudgeted";
 
@@ -75,8 +76,10 @@ export function setBudget(uid: string, categoryId: number, amount: number | null
   requireCategory(uid, categoryId);
   if (!amount || amount <= 0) {
     db().delete(budgets).where(and(eq(budgets.userId, uid), eq(budgets.categoryId, categoryId))).run();
+    audit(uid, "budget", categoryId, "delete", `Removed the budget of category ${categoryId}`);
     return null;
   }
+  audit(uid, "budget", categoryId, "set", `Budget of category ${categoryId}: ${amount}${currency ? ` ${currency}` : ""} a month`);
   const base = getSettings(uid).currency;
   let cur: string | null | undefined = currency === undefined ? undefined : currency ? normalizeCurrency(currency) : null;
   if (cur && !isCurrencyCode(cur)) throw new Error(`Unknown currency "${currency}"`);

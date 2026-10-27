@@ -23,6 +23,7 @@ const USER_TABLES = [
   "presence",
   "tax_inputs",
   "goals",
+  "changes",
 ] as const;
 
 const TTL_MS = 15_000;

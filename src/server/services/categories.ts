@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/server/db/client";
 import { accounts, categories, categoryRules, transactions, type Category } from "@/server/db/schema";
 import { toCents } from "@/lib/money";
+import { audit } from "./audit";
 
 export const categoryInputSchema = z.object({
   name: z.string().trim().min(1).max(60),
@@ -160,6 +161,7 @@ export function saveRule(uid: string, raw: RuleInput & { id?: number }) {
           .get()
       : undefined;
   if (raw.id && !existing) throw new Error(`Rule ${raw.id} not found`);
+  audit(uid, "rule", existing?.id ?? null, existing ? "update" : "create", `Rule “${p}” → category ${i.categoryId}`);
   if (existing) return db().update(categoryRules).set(values).where(eq(categoryRules.id, existing.id)).returning().get()!;
   return db().insert(categoryRules).values(values).returning().get();
 }

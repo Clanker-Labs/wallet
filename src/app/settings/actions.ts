@@ -2,6 +2,7 @@
 
 import { createBackup, restoreBackup } from "@/server/services/backup";
 import { importExport } from "@/server/services/export";
+import { audit } from "@/server/services/audit";
 import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
 import { setSetting, type AppSettings } from "@/server/services/settings";
@@ -270,8 +271,9 @@ export async function backupNowAction(): Promise<ActionResult> {
 
 export async function restoreBackupAction(name: string): Promise<ActionResult> {
   try {
-    await requireOwner();
+    const owner = await requireOwner();
     const r = restoreBackup(name);
+    audit(owner.id, "backup", name, "restore", `Restored the backup ${name} (state before kept as ${r.safety})`);
     invalidateSqlSandbox();
     refreshAll();
     return { ok: true, message: `Restored ${r.tables} tables from ${name}. The state before is kept as ${r.safety}.` };
@@ -287,6 +289,7 @@ export async function importExportAction(fd: FormData): Promise<ActionResult> {
     if (!(file instanceof File)) return { ok: false, error: "Choose a wallet export (.json)." };
     if (file.size > 50 * 1024 * 1024) return { ok: false, error: "That file is over 50 MB." };
     const counts = importExport(uid, JSON.parse(await file.text()));
+    audit(uid, "import", null, "import", `Imported a wallet export: ${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(", ")}`);
     invalidateSqlSandbox(uid);
     refreshAll();
     const n = (k: string) => counts[k] ?? 0;

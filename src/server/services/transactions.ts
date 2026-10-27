@@ -12,6 +12,7 @@ import { fxConverter } from "./fx";
 import { getSettings, today } from "./settings";
 import { matchTransfers } from "./transfers";
 import { reconcileRecurring } from "./recurring";
+import { audit } from "./audit";
 
 export const transactionInputSchema = z.object({
   date: z.string().refine(isISODate, "Expected YYYY-MM-DD").optional(),
@@ -82,6 +83,7 @@ export function addTransaction(uid: string, raw: TransactionInput) {
     .returning()
     .get();
   reconcileRecurring(uid);
+  audit(uid, "transaction", row.id, "add", `${row.description}: ${(row.amountCents / 100).toFixed(2)} ${row.currency} on ${row.date}`);
   return row;
 }
 
@@ -102,7 +104,9 @@ export function updateTransaction(uid: string, id: number, raw: Partial<Transact
     patch.accountId = input.accountId ?? null;
   }
   if (input.notes !== undefined) patch.notes = input.notes ?? null;
-  return db().update(transactions).set(patch).where(eq(transactions.id, id)).returning().get();
+  const updated = db().update(transactions).set(patch).where(eq(transactions.id, id)).returning().get();
+  audit(uid, "transaction", id, "update", `Changed ${Object.keys(patch).join(", ")} of “${updated?.description}”`);
+  return updated;
 }
 
 export function deleteTransaction(uid: string, id: number) {
@@ -110,6 +114,7 @@ export function deleteTransaction(uid: string, id: number) {
     .delete(transactions)
     .where(and(eq(transactions.id, id), eq(transactions.userId, uid)))
     .run();
+  audit(uid, "transaction", id, "delete", `Deleted transaction ${id}`);
 }
 
 function filterWhere(uid: string, f: z.output<typeof transactionFilterSchema>) {
@@ -339,6 +344,7 @@ export function importTransactions(
     transfers = matchTransfers(uid, { from: addDays(dates[0], -3), to: addDays(dates.at(-1)!, 3) }).matched;
   }
   if (inserted || adopted) reconcileRecurring(uid);
+  if (inserted || adopted) audit(uid, "transaction", accountId, "import", `Imported ${inserted} transaction${inserted === 1 ? "" : "s"}${adopted ? `, ${adopted} matched to ones entered by hand` : ""} (${opts.source ?? "csv"})`);
   return {
     inserted,
     duplicates: rows.length - inserted - adopted,
@@ -375,6 +381,7 @@ export function setSplits(uid: string, id: number, raw: z.input<typeof splitInpu
     t.insert(transactionSplits)
       .values(parts.map((p, i) => ({ transactionId: id, userId: uid, categoryId: p.categoryId, amountCents: cents[i], note: p.note ?? null })))
       .run();
+    audit(uid, "transaction", id, "split", `Split “${tx.description}” in ${parts.length}`);
     const largest = parts[cents.map(Math.abs).indexOf(Math.max(...cents.map(Math.abs)))];
     t.update(transactions).set({ categoryId: largest.categoryId }).where(eq(transactions.id, id)).run();
   });

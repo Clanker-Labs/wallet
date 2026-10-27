@@ -399,6 +399,46 @@ export const goals = sqliteTable(
   (t) => [index("goals_user").on(t.userId)],
 );
 
+/**
+ * An account shared with another member of this wallet (a partner): it shows
+ * in their accounts and net worth at `sharePct` of it. "edit" lets them record
+ * balances; its terms, positions and history stay the owner's to change.
+ */
+export const accountShares = sqliteTable(
+  "account_shares",
+  {
+    accountId: integer("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    userId: userId(),
+    role: text("role").$type<"view" | "edit">().notNull().default("view"),
+    /** Their share of the account for their net worth (0–100). */
+    sharePct: real("share_pct").notNull().default(50),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.userId] }), index("account_shares_user").on(t.userId)],
+);
+
+/** Who changed what, when: one row per change made through the app, the assistant or the API. */
+export const changes = sqliteTable(
+  "changes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** Whose data it is. */
+    userId: userId(),
+    /** Who did it (a partner editing a shared account, or the user themselves). */
+    actorId: text("actor_id"),
+    at: integer("at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    entity: text("entity").notNull(),
+    entityId: text("entity_id"),
+    action: text("action").notNull(),
+    summary: text("summary").notNull(),
+  },
+  (t) => [index("changes_user_at").on(t.userId, t.at)],
+);
+
 /** Time spent in a country (a trip, a stay), for the tax-residency day count. */
 export const presence = sqliteTable(
   "presence",

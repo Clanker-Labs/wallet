@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Archive, ArrowLeft, ArchiveRestore, ArrowRight, Plus } from "lucide-react";
-import { balanceOnDate, getAccount, listAccounts } from "@/server/services/accounts";
+import { balanceOnDate, getAccount, listAccounts, listShares } from "@/server/services/accounts";
+import { listUsers } from "@/server/services/users";
+import { AccountSharing } from "@/components/account-sharing";
 import { today } from "@/server/services/settings";
 import { serverFormat } from "@/server/format";
 import {
@@ -71,6 +73,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const showAll = (await searchParams).all === "1";
   if (!data) notFound();
   const { account: a, snapshots } = data;
+  /** Yours, or shared with you by another member. */
+  const mine = a.userId === uid;
   const f = serverFormat(uid);
   const t = today(uid);
   const liability = isLiability(a.assetClass);
@@ -338,6 +342,12 @@ export default async function AccountPage({ params, searchParams }: Props) {
         <Card>
           <p className="text-sm text-ink-2">This account is closed. Unarchive it (bottom of the page) to record new balances.</p>
         </Card>
+      ) : !mine && a.shareRole !== "edit" ? (
+        <Card>
+          <p className="text-sm text-ink-2">
+            {a.sharedBy} shared this account with you to view. Your share, {+a.ownershipPct.toFixed(2)}%, counts in your net worth.
+          </p>
+        </Card>
       ) : (
         <Card>
           <CardHeader
@@ -424,8 +434,26 @@ export default async function AccountPage({ params, searchParams }: Props) {
         </Card>
       )}
 
+      {/* Shared: with whom (owner), or by whom (partner) */}
+      {mine ? (
+        !a.companyId && (
+          <Card>
+            <CardHeader title="Shared with" subtitle="A partner on this wallet sees it in their accounts and net worth, at their share" />
+            <AccountSharing
+              accountId={a.id}
+              shares={listShares(uid, a.id)}
+              members={listUsers().filter((u) => u.id !== uid).map((u) => ({ id: u.id, name: u.name }))}
+            />
+          </Card>
+        )
+      ) : (
+        <p className="text-sm text-muted">
+          Shared by {a.sharedBy} · your share {+a.ownershipPct.toFixed(2)}% · {a.shareRole === "edit" ? "you can record balances" : "view only"}
+        </p>
+      )}
+
       {/* Edit (a job's terms are edited on the Jobs page) */}
-      {!job && <Card className="py-3">
+      {!job && mine && <Card className="py-3">
         <Disclosure summaryClassName="py-1" summary={<span className="text-sm font-semibold">Edit details</span>}>
           <div className="pt-4 pb-2">
             <AccountForm
@@ -440,7 +468,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
       </Card>}
 
       {/* Archive / delete */}
-      <Card>
+      {mine && <Card>
         <CardHeader title="Close or delete" />
         <div className="grid gap-6 sm:grid-cols-2">
           <div className="space-y-3">
@@ -473,7 +501,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
             <DeleteAccountForm id={a.id} name={a.name} snapshotCount={snapshots.length} />
           </div>
         </div>
-      </Card>
+      </Card>}
     </div>
   );
 }

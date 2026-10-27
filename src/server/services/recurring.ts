@@ -11,6 +11,7 @@ import { requireCategory } from "./categories";
 import { fxConverter } from "./fx";
 import { getSettings, today } from "./settings";
 import { netWorthOn } from "./networth";
+import { audit } from "./audit";
 
 /**
  * Recurring money: salary, rent, subscriptions, loan payments.
@@ -147,7 +148,8 @@ export function updateRecurring(uid: string, id: number, raw: Partial<RecurringI
 }
 
 export function deleteRecurring(uid: string, id: number) {
-  requireRecurring(uid, id);
+  const r = requireRecurring(uid, id);
+  audit(uid, "recurring", id, "delete", `Deleted recurring “${r.name}”`);
   db().delete(recurring).where(eq(recurring.id, id)).run();
 }
 

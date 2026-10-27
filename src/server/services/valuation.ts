@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray, or } from "drizzle-orm";
 import { db } from "@/server/db/client";
 import { holdings, type Account, type Holding } from "@/server/db/schema";
 import { fxConverter, type FxConverter } from "./fx";
@@ -24,7 +24,15 @@ export interface ValuationContext {
 
 export function valuationContext(uid: string): ValuationContext {
   const byAccount = new Map<number, Holding[]>();
-  for (const h of db().select().from(holdings).where(eq(holdings.userId, uid)).all()) {
+  // Yours, and those in accounts other members shared with you.
+  const shared = db()
+    .$client.prepare("SELECT account_id AS id FROM account_shares WHERE user_id = ?")
+    .all(uid)
+    .map((r) => (r as { id: number }).id);
+  const rows = shared.length
+    ? db().select().from(holdings).where(or(eq(holdings.userId, uid), inArray(holdings.accountId, shared))).all()
+    : db().select().from(holdings).where(eq(holdings.userId, uid)).all();
+  for (const h of rows) {
     const list = byAccount.get(h.accountId) ?? [];
     list.push(h);
     byAccount.set(h.accountId, list);

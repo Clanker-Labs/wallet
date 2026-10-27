@@ -238,6 +238,7 @@ function AccountRow({ a, t, base, locale }: { a: AccountWithBalance; t: string; 
           {partial && <Badge>{+a.ownershipPct.toFixed(2)}%</Badge>}
           {!a.includeInNetWorth && <Badge>not counted</Badge>}
           {a.companyId && <Badge>company&apos;s · counted through it</Badge>}
+          {a.sharedBy && <Badge>shared by {a.sharedBy}</Badge>}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted">
           {meta && <span>{meta}</span>}

@@ -11,6 +11,7 @@ import { averageMonthlySavings } from "./budgets";
 import { netWorthOn } from "./networth";
 import { getSettings, today } from "./settings";
 import { valuationContext } from "./valuation";
+import { audit } from "./audit";
 
 /**
  * Goals: an amount to reach, by a date or not, measured on some accounts (a
@@ -68,6 +69,7 @@ export function saveGoal(uid: string, raw: GoalInput & { id?: number }): Goal {
     accountIds: i.accountIds,
     monthlyCents: i.monthly != null ? toCents(i.monthly) : null,
   };
+  audit(uid, "goal", raw.id ?? null, raw.id ? "update" : "create", `Goal “${values.name}”: ${i.target} ${currency}${values.targetDate ? ` by ${values.targetDate}` : ""}`);
   if (raw.id) {
     requireGoal(uid, raw.id);
     return db().update(goals).set(values).where(eq(goals.id, raw.id)).returning().get()!;

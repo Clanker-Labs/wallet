@@ -9,6 +9,7 @@ import { companyParamsSchema, createAccount, getAccountRow, listAccounts, update
 import { companyMonths, trailingTwelve, type CompanyMonth } from "./company-pnl";
 import { today } from "./settings";
 import { valuationContext } from "./valuation";
+import { audit } from "./audit";
 
 /**
  * Companies you own, as net-worth assets: their value (from their own
@@ -108,6 +109,7 @@ export function setCompanyFinancials(uid: string, companyId: number, month: stri
     return null;
   }
   const values = { userId: uid, companyId, month, revenueCents: toCents(Math.abs(revenue)), expensesCents: toCents(Math.abs(expenses)), note: note ?? null };
+  audit(uid, "company", companyId, "financials", `${c.name} ${month}: revenue ${revenue}, expenses ${expenses}`);
   return db()
     .insert(companyFinancials)
     .values(values)

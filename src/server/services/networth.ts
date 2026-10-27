@@ -4,7 +4,7 @@ import { db } from "@/server/db/client";
 import { accounts } from "@/server/db/schema";
 import { ASSET_CLASSES, isLiability, type AssetClass } from "@/lib/domain";
 import { addDays, addMonths, endOfMonth, monthRange } from "@/lib/dates";
-import { snapshotsByAccount, withBalance, type AccountWithBalance } from "./accounts";
+import { snapshotsByAccount, visibleAccounts, withBalance, type AccountWithBalance } from "./accounts";
 import { valuationContext, type ValuationContext } from "./valuation";
 
 /** All amounts are in the user's base currency. */
@@ -25,7 +25,8 @@ export interface NetWorthBreakdown extends NetWorthPoint {
 }
 
 function loadAll(uid: string) {
-  const accs = db().select().from(accounts).where(eq(accounts.userId, uid)).all();
+  // Your accounts and the ones shared with you (at your share).
+  const accs = visibleAccounts(uid, { includeArchived: true });
   const byAccount = snapshotsByAccount(
     uid,
     accs.map((a) => a.id),

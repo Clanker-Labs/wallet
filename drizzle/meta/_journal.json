@@ -71,6 +71,13 @@
       "when": 1793109850733,
       "tag": "0009_goals",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793110586378,
+      "tag": "0010_sharing_audit",
+      "breakpoints": true
     }
   ]
 }

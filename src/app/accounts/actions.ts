@@ -10,6 +10,8 @@ import {
   deleteSnapshot,
   getAccountRow,
   recordBalance,
+  shareAccount,
+  unshareAccount,
   unarchiveAccount,
   updateAccount,
   type AccountInput,
@@ -226,6 +228,29 @@ export async function saveLoanEventsAction(accountId: number, events: NonNullabl
     updateAccount(uid, accountId, { loanParams: { ...acc.loanParams, events } });
     refresh();
     return { ok: true, message: "Schedule updated" };
+  } catch (e) {
+    return { ok: false, message: errorMessage(e) };
+  }
+}
+
+/** Share an account with another member (or change their role/share). */
+export async function shareAccountAction(accountId: number, memberId: string, role: "view" | "edit", sharePct: number): Promise<AccountActionState> {
+  const uid = await requireUid();
+  try {
+    shareAccount(uid, accountId, memberId, role, sharePct);
+    refresh();
+    return { ok: true, message: "Shared" };
+  } catch (e) {
+    return { ok: false, message: errorMessage(e) };
+  }
+}
+
+export async function unshareAccountAction(accountId: number, memberId: string): Promise<AccountActionState> {
+  const uid = await requireUid();
+  try {
+    unshareAccount(uid, accountId, memberId);
+    refresh();
+    return { ok: true, message: "No longer shared" };
   } catch (e) {
     return { ok: false, message: errorMessage(e) };
   }

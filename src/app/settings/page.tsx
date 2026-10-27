@@ -23,6 +23,7 @@ import { CategoriesEditor, type CategoryItem } from "@/components/settings-categ
 import { RulesEditor } from "@/components/settings-rules";
 import { BackupsPanel } from "@/components/settings-backups";
 import { backupDir, listBackups } from "@/server/services/backup";
+import { listChanges } from "@/server/services/audit";
 import { PasskeyList, type PasskeyItem } from "@/components/settings-security";
 import { RefreshRatesButton } from "@/components/settings-currency";
 import { TelegramLink } from "@/components/settings-telegram";
@@ -45,6 +46,7 @@ export default async function SettingsPage() {
   const uid = user.id;
   const isOwner = user.role === "owner";
   const prefs = getSettings(uid);
+  const changes = listChanges(uid, 100);
   const base = prefs.currency;
   const todayISO = today(uid);
 
@@ -59,6 +61,7 @@ export default async function SettingsPage() {
     ["integrations", "Integrations"],
     ...(isOwner ? ([["members", "Members"]] as [string, string][]) : []),
     ["data", "Data"],
+    ["activity", "Activity"],
   ];
 
   // ── Dates in the user's zone ──
@@ -585,6 +588,24 @@ export default async function SettingsPage() {
             {counts.categories} categories · {counts.reminders} reminders · {counts.simulations} saved scenarios
           </dd>
         </dl>
+      </Card>
+      <Card id="activity" className="scroll-mt-20">
+        <CardHeader title="Activity" subtitle="Every change to your data, newest first — from the app, the assistant, Telegram or a partner" />
+        {changes.length === 0 ? (
+          <p className="text-sm text-ink-2">Nothing yet.</p>
+        ) : (
+          <ul className="divide-y divide-border text-sm">
+            {changes.map((c) => (
+              <li key={c.id} className="flex flex-wrap items-baseline justify-between gap-x-3 py-1.5">
+                <span className="min-w-0">{c.summary}</span>
+                <span className="shrink-0 text-xs text-muted">
+                  {c.actorId && c.actorId !== uid ? `${c.actorName ?? "someone"} · ` : ""}
+                  {new Date(c.at).toLocaleString(prefs.locale, { dateStyle: "medium", timeStyle: "short" })}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
     </div>
   );

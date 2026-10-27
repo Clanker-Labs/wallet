@@ -7,6 +7,7 @@ import { isISODate } from "@/lib/dates";
 import { currencySchema, getAccountRow, recordBalance, snapshotHoldingAccounts } from "./accounts";
 import { valuationContext, valueHolding, type ValuationContext } from "./valuation";
 import { refreshPrices } from "./prices";
+import { audit } from "./audit";
 
 export const holdingInputSchema = z.object({
   accountId: z.number().int().describe("Account that holds the position (brokerage, PEA, crypto wallet…)"),
@@ -195,6 +196,7 @@ export async function upsertHolding(uid: string, raw: HoldingInput, opts: { fetc
     priceError = r.failed[0]?.error ?? null;
   }
   snapshotHoldingAccounts(uid);
+  audit(uid, "holding", holding.id, existing ? "update" : "add", `${holding.name}: ${holding.quantity} in ${account.name}`);
   return { holding, updated: !!existing, priceError };
 }
 

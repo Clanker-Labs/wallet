@@ -16,6 +16,8 @@ import * as recurringSvc from "@/server/services/recurring";
 import * as companiesSvc from "@/server/services/companies";
 import * as taxSvc from "@/server/services/tax";
 import * as goalsSvc from "@/server/services/goals";
+import { listChanges } from "@/server/services/audit";
+import { listUsers } from "@/server/services/users";
 import { investmentAnalytics } from "@/server/services/investment-analytics";
 import { getOverview } from "@/server/services/overview";
 import { getSettings, today } from "@/server/services/settings";
@@ -634,6 +636,35 @@ export const TOOLS = [
     input: z.object({ year: z.number().int().min(2000).max(2100) }),
     readOnly: true,
     run: ({ year }, { userId }) => ({ stays: taxSvc.listPresence(userId, year), ...taxSvc.daysByCountry(userId, `${year}-01-01`, `${year}-12-31`) }),
+  }),
+  tool({
+    name: "share_account",
+    title: "Share an account with a partner",
+    description:
+      "Share one of the user's accounts with another member of this wallet (memberId from list_members): it shows in their accounts and net worth at sharePct of it. role 'edit' lets them record balances; 'view' doesn't. remove: true stops sharing. Transactions stay private.",
+    input: z.object({ accountId: z.number().int(), memberId: z.string(), role: z.enum(["view", "edit"]).default("view"), sharePct: z.number().min(0).max(100).default(50), remove: z.boolean().default(false) }),
+    readOnly: false,
+    run: ({ accountId, memberId, role, sharePct, remove }, { userId }) => {
+      if (remove) accountsSvc.unshareAccount(userId, accountId, memberId);
+      else accountsSvc.shareAccount(userId, accountId, memberId, role, sharePct);
+      return { shares: accountsSvc.listShares(userId, accountId) };
+    },
+  }),
+  tool({
+    name: "list_members",
+    title: "Members of this wallet",
+    description: "The other people with an account on this wallet (id and name), to share accounts with.",
+    input: z.object({}),
+    readOnly: true,
+    run: (_i, { userId }) => listUsers().filter((u) => u.id !== userId).map((u) => ({ id: u.id, name: u.name })),
+  }),
+  tool({
+    name: "list_changes",
+    title: "Recent changes (audit trail)",
+    description: "What changed in the user's data and who did it (the user, the assistant, Telegram or a partner on a shared account), newest first.",
+    input: z.object({ limit: z.number().int().min(1).max(500).default(50) }),
+    readOnly: true,
+    run: ({ limit }, { userId }) => listChanges(userId, limit).map((c) => ({ ...c, at: new Date(c.at).toISOString() })),
   }),
   tool({
     name: "list_goals",

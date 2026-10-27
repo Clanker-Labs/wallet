@@ -374,6 +374,31 @@ export const companyFinancials = sqliteTable(
   (t) => [uniqueIndex("company_financials_month").on(t.companyId, t.month)],
 );
 
+/**
+ * Something to save for: an amount by a date (a flat deposit, a car), or a
+ * level of net worth. Progress is what the linked accounts hold (or the whole
+ * net worth when none are linked), in the goal's currency.
+ */
+export const goals = sqliteTable(
+  "goals",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: userId(),
+    name: text("name").notNull(),
+    icon: text("icon"),
+    targetCents: integer("target_cents").notNull(),
+    currency: text("currency").notNull(),
+    targetDate: text("target_date"),
+    /** Accounts whose balances count towards it; empty = the whole net worth. */
+    accountIds: text("account_ids", { mode: "json" }).$type<number[]>().notNull().default(sql`'[]'`),
+    /** What you plan to put in each month; empty = use your average savings. */
+    monthlyCents: integer("monthly_cents"),
+    archivedAt: text("archived_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("goals_user").on(t.userId)],
+);
+
 /** Time spent in a country (a trip, a stay), for the tax-residency day count. */
 export const presence = sqliteTable(
   "presence",

@@ -22,6 +22,7 @@ import {
   Settings,
   ShieldCheck,
   Sun,
+  Target,
   X,
 } from "lucide-react";
 import { Wordmark } from "./brand";
@@ -35,6 +36,7 @@ const NAV = [
   { href: "/companies", label: "Companies", icon: Building2 },
   { href: "/budgets", label: "Budgets", icon: PiggyBank },
   { href: "/recurring", label: "Recurring", icon: Repeat },
+  { href: "/goals", label: "Goals", icon: Target },
   { href: "/transactions", label: "Transactions", icon: ReceiptText },
   { href: "/tax", label: "Tax", icon: Scale },
   { href: "/simulations", label: "Simulations", icon: Calculator },

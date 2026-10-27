@@ -15,6 +15,7 @@ import { matchTransfers } from "@/server/services/transfers";
 import * as recurringSvc from "@/server/services/recurring";
 import * as companiesSvc from "@/server/services/companies";
 import * as taxSvc from "@/server/services/tax";
+import * as goalsSvc from "@/server/services/goals";
 import { investmentAnalytics } from "@/server/services/investment-analytics";
 import { getOverview } from "@/server/services/overview";
 import { getSettings, today } from "@/server/services/settings";
@@ -633,6 +634,38 @@ export const TOOLS = [
     input: z.object({ year: z.number().int().min(2000).max(2100) }),
     readOnly: true,
     run: ({ year }, { userId }) => ({ stays: taxSvc.listPresence(userId, year), ...taxSvc.daysByCountry(userId, `${year}-01-01`, `${year}-12-31`) }),
+  }),
+  tool({
+    name: "list_goals",
+    title: "Savings goals",
+    description:
+      "The user's goals: target amount and currency, optional date, the accounts that count (none = whole net worth), current progress and %, what's left, the monthly amount needed to arrive on the date, the pace used (planned monthly, or average savings) and the projected date, and whether it's on track.",
+    input: z.object({ includeArchived: z.boolean().default(false) }),
+    readOnly: true,
+    run: ({ includeArchived }, { userId }) => goalsSvc.listGoals(userId, { includeArchived }).map(({ history: _h, ...g }) => g),
+  }),
+  tool({
+    name: "save_goal",
+    title: "Add or update a goal",
+    description: "Add a goal (omit id) or change one: name, target and currency, optional targetDate, accountIds that hold it (empty = whole net worth), optional planned monthly contribution.",
+    input: goalsSvc.goalInputSchema.extend({ id: z.number().int().optional() }),
+    readOnly: false,
+    run: (i, { userId }) => {
+      const g = goalsSvc.saveGoal(userId, i);
+      invalidateSqlSandbox(userId);
+      return g;
+    },
+  }),
+  tool({
+    name: "delete_goal",
+    title: "Delete a goal",
+    description: "Delete a goal. Its accounts are untouched.",
+    input: z.object({ id: z.number().int() }),
+    readOnly: false,
+    run: ({ id }, { userId }) => {
+      goalsSvc.deleteGoal(userId, id);
+      return { deleted: id };
+    },
   }),
   tool({
     name: "get_investment_analytics",

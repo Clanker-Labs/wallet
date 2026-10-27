@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertCircle, ArrowRight, Bell, CalendarClock, Clock, CircleDollarSign, LineChart, Tag, TrendingUp } from "lucide-react";
 import { getOverview } from "@/server/services/overview";
+import { listGoals } from "@/server/services/goals";
 import { netWorthDaily, netWorthHistory, netWorthMoves } from "@/server/services/networth";
 import { serverFormat } from "@/server/format";
 import { ASSET_CLASS_LABELS, ASSET_CLASS_SLOT, type AssetClass } from "@/lib/domain";
@@ -31,6 +32,7 @@ export default async function Dashboard() {
   const history = netWorthHistory(uid, 120);
   const daily = netWorthDaily(uid, 365);
   const { moves } = netWorthMoves(uid);
+  const goals = listGoals(uid).slice(0, 4);
 
   if (nw.accounts.length === 0) {
     return (
@@ -100,6 +102,29 @@ export default async function Dashboard() {
         <CardHeader title="What moved" subtitle="The accounts behind the change, biggest first" />
         <MoversCard moves={moves} />
       </Card>
+
+      {goals.length > 0 && (
+        <Card>
+          <CardHeader title="Goals" action={<ButtonLink href="/goals" size="sm" variant="ghost">Goals <ArrowRight size={14} /></ButtonLink>} />
+          <ul className="grid gap-4 sm:grid-cols-2">
+            {goals.map((g) => (
+              <li key={g.id}>
+                <div className="mb-1 flex items-center justify-between gap-2 text-sm">
+                  <span className="truncate">
+                    {g.icon} {g.name}
+                    {g.onTrack === false && <span className="ml-2"><Badge tone="warning">behind</Badge></span>}
+                  </span>
+                  <span className="tabular shrink-0 text-ink-2">
+                    {f.money(g.currentCents, { currency: g.currency, whole: true })}
+                    <span className="text-muted"> / {f.money(g.targetCents, { currency: g.currency, whole: true })}</span>
+                  </span>
+                </div>
+                <Meter pct={g.pct} status={g.onTrack === false ? "ahead_of_pace" : "ok"} />
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-5">
         {/* Allocation */}

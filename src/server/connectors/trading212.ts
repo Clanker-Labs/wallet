@@ -1,11 +1,20 @@
 import crypto from "node:crypto";
 import type { HoldingType } from "@/lib/domain";
-import { ConnectorError, type BrokerConnector, type BrokerPosition, type FetchLike } from "./types";
+import {
+  ConnectorError,
+  type BrokerActivity,
+  type BrokerActivityKind,
+  type BrokerConnector,
+  type BrokerPosition,
+  type FetchHistoryInput,
+  type FetchLike,
+} from "./types";
 
 /**
  * Trading 212 public API (v0), read endpoints only:
  *   /equity/account/info, /equity/account/cash, /equity/portfolio,
- *   /equity/metadata/instruments.
+ *   /equity/metadata/instruments, and for history /equity/history/orders,
+ *   /equity/history/dividends and /history/transactions.
  * Docs: https://docs.trading212.com/api
  *
  * Auth is HTTP Basic with the API key as username and the API secret as
@@ -138,7 +147,10 @@ function authHeader(credentials: Record<string, string>): string {
 }
 
 async function get(path: string, auth: string, environment: string, fetchImpl: FetchLike): Promise<unknown> {
-  const url = `${baseUrl(environment)}${path}`;
+  return request(`${baseUrl(environment)}${path}`, path, auth, fetchImpl);
+}
+
+async function request(url: string, path: string, auth: string, fetchImpl: FetchLike, forbidden?: string): Promise<unknown> {
   let res: Response | null = null;
   let lastError: unknown = null;
   // One retry for network errors and 5xx; a 429 is reported, not waited out.
@@ -160,6 +172,7 @@ async function get(path: string, auth: string, environment: string, fetchImpl: F
   if (res.status === 401) throw new ConnectorError("Trading 212 rejected the API key and secret (401)", 401);
   if (res.status === 403) {
     throw new ConnectorError(
+      forbidden ??
       `This API key lacks a permission wallet needs for ${path} (403). Enable Account data, Portfolio and Metadata on the key.`,
       403,
     );
@@ -203,6 +216,187 @@ async function instruments(auth: string, environment: string, fetchImpl: FetchLi
   return byTicker;
 }
 
+// ── History ───────────────────────────────────────────────────────────────
+// Three paginated endpoints, newest first, `limit` ≤ 50, each with its own
+// limit of 20 requests a minute: they are paged side by side, each one paced.
+
+/** Pause between two pages of the same endpoint (20 a minute, with room to spare). */
+export const HISTORY_PAGE_PAUSE_MS = 3_200;
+/** Safety stop: 400 pages × 50 is 20,000 events per endpoint and run. */
+const HISTORY_MAX_PAGES = 400;
+const HISTORY_FORBIDDEN =
+  "This API key can't read history (403). Enable the History permissions on the key — Orders history, Dividends and Transactions — to import past trades.";
+
+const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
+const str = (v: unknown): string | null => (v === undefined || v === null || v === "" ? null : String(v));
+
+/** One /equity/history/orders item → a trade, or null (not filled, no fill). Reads the current and the older flat shape. */
+export function parseOrder(item: unknown): BrokerActivity | null {
+  const it = obj(item);
+  if (it.order !== undefined || it.fill !== undefined) {
+    const order = obj(it.order);
+    const fill = it.fill ? obj(it.fill) : null;
+    if (!fill || String(order.status ?? "FILLED").toUpperCase() !== "FILLED") return null;
+    const id = str(fill.id) ?? str(order.id);
+    const at = str(fill.filledAt) ?? str(order.createdAt);
+    let quantity = num(fill.quantity);
+    if (!id || !at || quantity === null || quantity === 0) return null;
+    const side = String(order.side ?? "").toUpperCase();
+    if (side === "SELL" && quantity > 0) quantity = -quantity;
+    if (side === "BUY" && quantity < 0) quantity = -quantity;
+    const inst = obj(order.instrument);
+    const ticker = str(order.ticker) ?? str(inst.ticker);
+    const rawCurrency = str(inst.currency) ?? str(order.currency) ?? "";
+    const [priceCurrency, divisor] = majorUnit(rawCurrency);
+    const rawPrice = num(fill.price);
+    const wallet = obj(fill.walletImpact);
+    const net = num(wallet.netValue);
+    const value = net !== null ? Math.abs(net) : Math.abs(num(order.filledValue) ?? (rawPrice ?? 0) * Math.abs(quantity));
+    return {
+      kind: "trade",
+      externalId: id,
+      at,
+      ticker,
+      symbol: ticker ? toYahooSymbol(ticker, rawCurrency) : null,
+      name: str(inst.name) ?? ticker,
+      quantity,
+      price: rawPrice === null ? null : rawPrice / divisor,
+      priceCurrency: priceCurrency || null,
+      cash: quantity > 0 ? -value : value,
+      currency: (str(wallet.currency) ?? str(order.currency) ?? priceCurrency).toUpperCase(),
+      realized: num(wallet.realisedProfitLoss),
+    };
+  }
+  // Older flat shape: { id, ticker, status, filledQuantity, fillPrice, filledValue, dateExecuted, … }.
+  if (String(it.status ?? "").toUpperCase() !== "FILLED") return null;
+  const id = str(it.fillId) ?? str(it.id);
+  const at = str(it.dateExecuted) ?? str(it.dateModified) ?? str(it.dateCreated);
+  const quantity = num(it.filledQuantity);
+  if (!id || !at || quantity === null || quantity === 0) return null;
+  const ticker = str(it.ticker);
+  const price = num(it.fillPrice);
+  const value = Math.abs(num(it.filledValue) ?? (price ?? 0) * Math.abs(quantity));
+  return {
+    kind: "trade",
+    externalId: id,
+    at,
+    ticker,
+    symbol: ticker ? toYahooSymbol(ticker) : null,
+    name: ticker,
+    quantity,
+    price,
+    priceCurrency: null,
+    cash: quantity > 0 ? -value : value,
+    currency: "",
+    realized: null,
+  };
+}
+
+export function parseDividend(item: unknown): BrokerActivity | null {
+  const it = obj(item);
+  const id = str(it.reference);
+  const at = str(it.paidOn);
+  const amount = num(it.amount);
+  if (!id || !at || amount === null) return null;
+  const inst = obj(it.instrument);
+  const ticker = str(it.ticker) ?? str(inst.ticker);
+  return {
+    kind: "dividend",
+    externalId: id,
+    at,
+    ticker,
+    symbol: ticker ? toYahooSymbol(ticker, str(inst.currency) ?? "") : null,
+    name: str(inst.name) ?? ticker,
+    quantity: null,
+    price: null,
+    priceCurrency: null,
+    cash: amount,
+    currency: (str(it.currency) ?? "").toUpperCase(),
+    realized: null,
+  };
+}
+
+const TRANSACTION_KINDS: Record<string, BrokerActivityKind> = {
+  DEPOSIT: "deposit",
+  WITHDRAW: "withdrawal",
+  WITHDRAWAL: "withdrawal",
+  FEE: "fee",
+  INTEREST_ON_FREE_CASH: "interest",
+  INTEREST: "interest",
+};
+
+export function parseTransaction(item: unknown): BrokerActivity | null {
+  const it = obj(item);
+  const id = str(it.reference);
+  const at = str(it.dateTime);
+  let amount = num(it.amount);
+  if (!id || !at || amount === null) return null;
+  const type = String(it.type ?? "").toUpperCase();
+  // A transfer between Trading 212 accounts is money in or out all the same.
+  let kind: BrokerActivityKind = TRANSACTION_KINDS[type] ?? (type === "TRANSFER" ? (amount < 0 ? "withdrawal" : "deposit") : "other");
+  if ((kind === "withdrawal" || kind === "fee") && amount > 0) amount = -amount;
+  if (kind === "deposit" && amount < 0) kind = "withdrawal";
+  return {
+    kind,
+    externalId: id,
+    at,
+    ticker: null,
+    symbol: null,
+    name: kind === "other" ? type || null : null,
+    quantity: null,
+    price: null,
+    priceCurrency: null,
+    cash: amount,
+    currency: (str(it.currency) ?? "").toUpperCase(),
+    realized: null,
+  };
+}
+
+type PagedInput = FetchHistoryInput & { auth: string; fetchImpl: FetchLike };
+
+async function pageAll(firstPath: string, parse: (item: unknown) => BrokerActivity | null, input: PagedInput) {
+  const host = `https://${input.environment === "demo" ? "demo" : "live"}.trading212.com`;
+  const sleep = input.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const activities: BrokerActivity[] = [];
+  let path: string | null = `/api/v0${firstPath}`;
+  for (let page = 0; path; page++) {
+    if (page >= HISTORY_MAX_PAGES) return { activities, incomplete: true, warning: `${firstPath}: stopped after ${page} pages` };
+    if (page > 0) await sleep(HISTORY_PAGE_PAUSE_MS);
+    let body: Record<string, unknown>;
+    try {
+      body = obj(await request(`${host}${path}`, firstPath.split("?")[0], input.auth, input.fetchImpl, HISTORY_FORBIDDEN));
+    } catch (e) {
+      // A bad key or a missing permission is the user's to fix; anything else (rate limit,
+      // outage) ends this endpoint early, keeping what came, and the next run continues.
+      if (e instanceof ConnectorError && (e.status === 401 || e.status === 403)) throw e;
+      return { activities, incomplete: true, warning: e instanceof Error ? e.message : String(e) };
+    }
+    const items = Array.isArray(body.items) ? body.items : [];
+    const parsed = items.map(parse).filter((a): a is BrokerActivity => a !== null);
+    activities.push(...parsed);
+    if (input.isKnown && parsed.length && parsed.every((a) => input.isKnown!(a.kind, a.externalId))) break;
+    const next = str(body.nextPagePath);
+    // Only ever follow a path on the same API, never a URL the response names.
+    path = next && items.length && /^\/api\/v0\//.test(next) ? next : null;
+  }
+  return { activities, incomplete: false, warning: null };
+}
+
+async function fetchHistory(input: FetchHistoryInput) {
+  if (input.environment !== "live" && input.environment !== "demo") throw new ConnectorError(`Unknown Trading 212 environment “${input.environment}”`);
+  const paged: PagedInput = { ...input, auth: authHeader(input.credentials), fetchImpl: input.fetchImpl ?? fetch };
+  const parts = await Promise.all([
+    pageAll("/equity/history/orders?limit=50", parseOrder, paged),
+    pageAll("/equity/history/dividends?limit=50", parseDividend, paged),
+    pageAll("/history/transactions?limit=50", parseTransaction, paged),
+  ]);
+  return {
+    activities: parts.flatMap((p) => p.activities),
+    incomplete: parts.some((p) => p.incomplete),
+    warnings: parts.map((p) => p.warning).filter((w): w is string => !!w),
+  };
+}
+
 // ── Connector ─────────────────────────────────────────────────────────────
 
 export const trading212: BrokerConnector = {
@@ -210,7 +404,7 @@ export const trading212: BrokerConnector = {
   name: "Trading 212",
   description: "Invest and ISA accounts: positions, average prices and free cash, synced hourly.",
   setupHint:
-    "In the Trading 212 app: Settings → API (Beta) → Generate API key. Grant only the read permissions — Account data, Portfolio and Metadata. wallet never places orders, so leave Orders off.",
+    "In the Trading 212 app: Settings → API (Beta) → Generate API key. Grant only the read permissions — Account data, Portfolio, Metadata, and History (orders, dividends, transactions) to import past trades. wallet never places orders, so leave Orders off.",
   docsUrl: "https://docs.trading212.com/api",
   environments: [
     { id: "live", label: "Live (real money)" },
@@ -220,6 +414,8 @@ export const trading212: BrokerConnector = {
     { key: "apiKey", label: "API key", secret: false, placeholder: "e.g. 3523019ZSBkxMNL…" },
     { key: "apiSecret", label: "API secret", secret: true },
   ],
+
+  fetchHistory,
 
   async fetchSnapshot({ credentials, environment, fetchImpl = fetch }) {
     if (environment !== "live" && environment !== "demo") throw new ConnectorError(`Unknown Trading 212 environment “${environment}”`);

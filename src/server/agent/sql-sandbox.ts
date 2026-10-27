@@ -24,6 +24,7 @@ const USER_TABLES = [
   "tax_inputs",
   "goals",
   "changes",
+  "broker_activity",
 ] as const;
 
 const TTL_MS = 15_000;

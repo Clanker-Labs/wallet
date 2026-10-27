@@ -5,6 +5,7 @@ import { accounts, brokerConnections, holdings, type BrokerConnection } from "@/
 import { CONNECTORS, ConnectorError, getConnector, type BrokerSnapshot, type FetchLike } from "@/server/connectors";
 import { decryptSecret, encryptSecret } from "@/server/secrets";
 import { createAccount, getAccountRow, snapshotHoldingAccounts } from "./accounts";
+import { syncBrokerHistory } from "./broker-history";
 import { refreshPrices, storePrices } from "./prices";
 import { today } from "./settings";
 import { listUsers } from "./users";
@@ -47,6 +48,9 @@ export interface ConnectionView {
   lastSyncAt: Date | null;
   lastSyncOk: boolean | null;
   lastError: string | null;
+  /** Past trades, dividends and cash movements: when last imported, and how it went. */
+  historySyncedAt: Date | null;
+  historyStatus: string | null;
   createdAt: Date | null;
 }
 
@@ -105,6 +109,8 @@ export function listConnections(uid: string): ConnectionView[] {
       lastSyncAt: c.lastSyncAt,
       lastSyncOk: c.lastSyncOk,
       lastError: c.lastError,
+      historySyncedAt: c.historySyncedAt,
+      historyStatus: c.historyStatus,
       createdAt: c.createdAt,
     };
   });
@@ -126,7 +132,7 @@ function errorText(e: unknown): string {
 export async function createConnection(
   uid: string,
   raw: z.input<typeof createConnectionSchema>,
-  opts: { fetchImpl?: FetchLike; fetchPrices?: boolean } = {},
+  opts: { fetchImpl?: FetchLike; fetchPrices?: boolean; history?: boolean } = {},
 ): Promise<{ connection: ConnectionView; sync: SyncResult }> {
   const input = createConnectionSchema.parse(raw);
   const connector = getConnector(input.provider);
@@ -191,6 +197,10 @@ export async function createConnection(
     .get();
 
   const sync = await applySnapshot(uid, row, snapshot, opts);
+  // The account's past: imported in the background (minutes for a long history, at the broker's pace).
+  if (connector.fetchHistory && opts.history !== false) {
+    void syncBrokerHistory(uid, row.id, { fetchImpl: opts.fetchImpl, full: true }).catch(() => {});
+  }
   return { connection: listConnections(uid).find((c) => c.id === row.id)!, sync };
 }
 

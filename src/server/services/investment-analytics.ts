@@ -7,15 +7,16 @@ import { addDays } from "@/lib/dates";
 import { snapshotsByAccount, withBalance } from "./accounts";
 import { listHoldings, type HoldingRow } from "./holdings";
 import { valuationContext } from "./valuation";
+import { brokerPerformance, type BrokerPerformance } from "./broker-history";
 
 /**
  * Portfolio analytics from stored daily prices.
  *
  * Returns, risk and the monthly grid describe the portfolio you hold TODAY,
  * as a chain-linked index in your base currency (exchange rates included):
- * "how have these positions done". wallet records positions, not trades, so
- * it cannot compute a money-weighted return of past decisions; the actual
- * value line (deposits and all) is returned alongside for that view.
+ * "how have these positions done". The actual value line (deposits and all)
+ * is returned alongside, and for accounts with imported broker history
+ * (`broker`), the real time- and money-weighted returns of past decisions.
  */
 
 export interface AnalyticsPeriod {
@@ -65,6 +66,12 @@ export interface InvestmentAnalytics {
   concentration: { top1Pct: number; top5Pct: number; effectiveHoldings: number } | null;
   /** Holdings with too little price history to include. */
   excluded: string[];
+  /**
+   * Accounts with imported broker history: the true time-weighted return of
+   * what was actually held day by day (deposits taken out), the money-weighted
+   * return (XIRR) and money in vs worth. Null without broker history.
+   */
+  broker: BrokerPerformance | null;
 }
 
 export interface Slice {
@@ -326,5 +333,6 @@ export function investmentAnalytics(uid: string, opts: { days?: number } = {}): 
     allocation: { byType: slices(typeMap, totalCents), byCurrency: slices(curMap, totalCents), byRegion: slices(regMap, totalCents), byAccount: slices(accMap, totalCents) },
     concentration: rows.length ? { top1Pct: (weights[0] ?? 0) * 100, top5Pct: weights.slice(0, 5).reduce((a, b) => a + b, 0) * 100, effectiveHoldings: hhi ? Math.round((1 / hhi) * 10) / 10 : 0 } : null,
     excluded,
+    broker: brokerPerformance(uid, { days, ctx }),
   };
 }

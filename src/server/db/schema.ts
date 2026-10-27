@@ -372,6 +372,38 @@ export const companyFinancials = sqliteTable(
   (t) => [uniqueIndex("company_financials_month").on(t.companyId, t.month)],
 );
 
+/** Time spent in a country (a trip, a stay), for the tax-residency day count. */
+export const presence = sqliteTable(
+  "presence",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: userId(),
+    /** ISO 3166 alpha-2 */
+    country: text("country").notNull(),
+    fromDate: text("from_date").notNull(),
+    /** Inclusive. */
+    toDate: text("to_date").notNull(),
+    note: text("note"),
+  },
+  (t) => [index("presence_user").on(t.userId)],
+);
+
+/**
+ * Answers the tax view needs and can't infer, per tax year (year 0 = every
+ * year): residence, French family parts, rental regime, a figure to use
+ * instead of the computed one. Keys are documented in services/tax.ts.
+ */
+export const taxInputs = sqliteTable(
+  "tax_inputs",
+  {
+    userId: userId(),
+    year: integer("year").notNull(),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.year, t.key] })],
+);
+
 /**
  * One payment over several categories (a supermarket receipt that is half
  * groceries, half household). Splits sum to the transaction's amount; budgets

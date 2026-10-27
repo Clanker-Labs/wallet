@@ -20,6 +20,8 @@ const USER_TABLES = [
   "recurring",
   "transaction_splits",
   "company_financials",
+  "presence",
+  "tax_inputs",
 ] as const;
 
 const TTL_MS = 15_000;

@@ -14,6 +14,7 @@ import * as jobsSvc from "@/server/services/jobs";
 import { matchTransfers } from "@/server/services/transfers";
 import * as recurringSvc from "@/server/services/recurring";
 import * as companiesSvc from "@/server/services/companies";
+import * as taxSvc from "@/server/services/tax";
 import { getOverview } from "@/server/services/overview";
 import { getSettings, today } from "@/server/services/settings";
 import { purchaseInputSchema, simulatePurchase, capacityInputSchema, borrowingCapacity } from "@/lib/finance/mortgage";
@@ -597,6 +598,40 @@ export const TOOLS = [
       invalidateSqlSandbox(userId);
       return r ?? { cleared: month };
     },
+  }),
+  tool({
+    name: "get_tax_report",
+    title: "Tax estimate for a year",
+    description:
+      "Estimate a year's taxes from the user's data, by country: personal income tax where they live (UAE: none; France: barème with parts) and on French-source income for non-residents (20%/30% minimum rate + 17.2% social charges on rent), French rental income (micro-foncier 30% or réel with loan interest from the schedule), IFI on French real estate above 1.3 M€, and corporate tax for each company where it is (UAE 9% above AED 375k with Small Business Relief / Qualifying Free Zone; France IS 15%/25%). Also days spent per country and residency notes. Every line cites its law; inputs it can't infer are listed in `inputs` and set with set_tax_input. An estimate, not a filing.",
+    input: z.object({ year: z.number().int().min(2000).max(2100) }),
+    readOnly: true,
+    run: ({ year }, { userId }) => taxSvc.taxReport(userId, year),
+  }),
+  tool({
+    name: "set_tax_input",
+    title: "Set a tax input",
+    description:
+      "Set what the tax estimate can't infer, for one year (or year 0 for every year): residence (ISO country, e.g. AE), homeOrJobInUae (true/false), fr.parts (family parts, e.g. 2 for a couple), fr.rental.regime (micro|reel), fr.rental.gross / fr.rental.expenses / fr.rental.interest (EUR, to override what was computed), fr.socialRate (standard|eea), fr.otherIncome, ifi.base (EUR), company.<id>.sbr / company.<id>.qfzp (true/false), company.<id>.rate (%), company.<id>.profit, other.<CC>.rate (% for income from a country without rules). An empty value clears it.",
+    input: z.object({ year: z.number().int().min(0).max(2100), key: z.string(), value: z.string() }),
+    readOnly: false,
+    run: ({ year, key, value }, { userId }) => taxSvc.setTaxInput(userId, year, key, value) ?? { cleared: key },
+  }),
+  tool({
+    name: "log_stay",
+    title: "Log time spent in a country",
+    description: "Record a stay (inclusive dates) in a country, for the tax-residency day count (UAE: 183 days, or 90 with a home or job there; France: séjour principal).",
+    input: taxSvc.presenceInputSchema,
+    readOnly: false,
+    run: (i, { userId }) => taxSvc.addPresence(userId, i),
+  }),
+  tool({
+    name: "list_stays",
+    title: "Stays per country",
+    description: "Logged stays, and days per country for a year.",
+    input: z.object({ year: z.number().int().min(2000).max(2100) }),
+    readOnly: true,
+    run: ({ year }, { userId }) => ({ stays: taxSvc.listPresence(userId, year), ...taxSvc.daysByCountry(userId, `${year}-01-01`, `${year}-12-31`) }),
   }),
   tool({
     name: "list_recurring",

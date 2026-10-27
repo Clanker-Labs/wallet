@@ -53,3 +53,21 @@ describe("dates", () => {
     expect(monthsBetween("2026-01-05", "2026-03-05")).toBe(2);
   });
 });
+
+describe("CSV date order, decided per column", () => {
+  it("reads a US file month-first throughout, even rows that look day-first", async () => {
+    const { applyMapping, detectDateFormat, parseCsv, guessMapping } = await import("@/lib/csv-import");
+    const parsed = parseCsv("Date,Description,Amount\n01/05/2026,Coffee,-3\n01/13/2026,Lunch,-12\n");
+    const r = applyMapping(parsed.rows, guessMapping(parsed.headers));
+    expect(r.ok.map((x) => x.date)).toEqual(["2026-01-05", "2026-01-13"]);
+    expect(r.dateFormat).toMatchObject({ format: "mdy", ambiguous: false, detected: true });
+    expect(detectDateFormat(["31/01/2026", "01/02/2026"])).toEqual({ format: "dmy", ambiguous: false, mixed: false });
+    expect(detectDateFormat(["2026-01-31"])).toEqual({ format: "ymd", ambiguous: false, mixed: false });
+  });
+
+  it("flags a file it cannot decide, and one that contradicts itself", async () => {
+    const { detectDateFormat } = await import("@/lib/csv-import");
+    expect(detectDateFormat(["03/04/2026", "05/06/2026"])).toEqual({ format: "dmy", ambiguous: true, mixed: false });
+    expect(detectDateFormat(["13/01/2026", "01/13/2026"]).mixed).toBe(true);
+  });
+});

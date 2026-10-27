@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { freshUser } from "./helpers";
 import { createAccount, getAccount, listAccounts, recordBalance } from "@/server/services/accounts";
 import { netWorthOn } from "@/server/services/networth";
-import { addTransaction, categorizeTransactions, listTransactions } from "@/server/services/transactions";
+import { addTransaction, categorizeTransactions, importTransactions, listTransactions } from "@/server/services/transactions";
 import { findCategory } from "@/server/services/categories";
 import { budgetStatus } from "@/server/services/budgets";
 import { setSetting } from "@/server/services/settings";
@@ -60,6 +60,9 @@ describe("users", () => {
     expect(netWorthOn(bob).netCents).toBe(50_00);
     expect(() => getAccount(bob, mine.id)).toThrow();
     expect(() => recordBalance(bob, { accountId: mine.id, balance: 0 })).toThrow();
+    // Not even by naming a currency, which used to skip the ownership check.
+    expect(() => addTransaction(bob, { amount: -1, currency: "EUR", accountId: mine.id, description: "x" })).toThrow();
+    expect(() => importTransactions(bob, [{ date: "2026-10-01", amount: -1, description: "x" }], mine.id, { currency: "EUR" })).toThrow();
     expect(listTransactions(bob).total).toBe(0);
     // Bob can't touch Alex's transaction, nor use Alex's categories.
     expect(categorizeTransactions(bob, [tx.id], findCategory(bob, "groceries")!.id).updated).toBe(0);

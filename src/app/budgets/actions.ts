@@ -10,8 +10,9 @@ export async function saveBudget(formData: FormData) {
   const uid = await requireUid();
   const categoryId = Number(formData.get("categoryId"));
   const amount = parseAmount(String(formData.get("amount") ?? ""));
+  const currency = formData.get("currency");
   if (!Number.isInteger(categoryId)) return;
-  setBudget(uid, categoryId, amount);
+  setBudget(uid, categoryId, amount, typeof currency === "string" && currency ? currency : undefined);
   revalidatePath("/budgets");
   revalidatePath("/");
 }

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
 import { addTransaction, categorizeTransactions, deleteTransaction } from "@/server/services/transactions";
 import { getCategory } from "@/server/services/categories";
+import { matchTransfers } from "@/server/services/transfers";
 import { parseAmount } from "@/lib/money";
 import { isISODate } from "@/lib/dates";
 import { requireUid } from "@/server/session";
@@ -90,5 +91,12 @@ export async function deleteTransactionAction(fd: FormData): Promise<void> {
   const id = Number(fd.get("id"));
   if (!isId(id)) return;
   deleteTransaction(uid, id);
+  refresh();
+}
+
+/** File every detected pair of moves between your own accounts under Transfers. */
+export async function matchTransfersAction(): Promise<void> {
+  const uid = await requireUid();
+  matchTransfers(uid);
   refresh();
 }

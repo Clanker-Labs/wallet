@@ -70,13 +70,54 @@ export function guessMapping(headers: string[]): CsvMapping {
   return { date, description, debit, credit, dateFormat: "auto" };
 }
 
+export interface DateFormatGuess {
+  format: "dmy" | "mdy" | "ymd";
+  /** True when no value decides it (every day ≤ 12): the format is a guess, ask the user. */
+  ambiguous: boolean;
+  /** True when the column contradicts itself (some rows only work day-first, others month-first). */
+  mixed: boolean;
+}
+
+/**
+ * Decide a whole column's date order once. Per-row guessing reads 01/05 as
+ * 1 May and 01/13 as 13 Jan in the same US file, silently — and since the date
+ * is in the duplicate check, re-importing with the right format then doubles
+ * those rows instead of fixing them.
+ */
+export function detectDateFormat(values: string[]): DateFormatGuess {
+  let dayFirst = false;
+  let monthFirst = false;
+  let iso = 0;
+  let other = 0;
+  for (const v of values) {
+    const s = v.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s) || /^\d{4}[/.]\d{1,2}[/.]\d{1,2}$/.test(s)) {
+      iso++;
+      continue;
+    }
+    const m = s.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})$/);
+    if (!m) continue;
+    other++;
+    if (+m[1] > 12) dayFirst = true;
+    if (+m[2] > 12) monthFirst = true;
+  }
+  if (iso && !other) return { format: "ymd", ambiguous: false, mixed: false };
+  if (dayFirst && monthFirst) return { format: "dmy", ambiguous: false, mixed: true };
+  if (monthFirst) return { format: "mdy", ambiguous: false, mixed: false };
+  return { format: "dmy", ambiguous: !dayFirst && other > 0, mixed: false };
+}
+
 export function applyMapping(
   rows: Record<string, string>[],
   mapping: CsvMapping,
-): { ok: ImportRow[]; errors: { row: number; reason: string }[] } {
+): { ok: ImportRow[]; errors: { row: number; reason: string }[]; dateFormat: DateFormatGuess & { detected: boolean } } {
   const ok: ImportRow[] = [];
   const errors: { row: number; reason: string }[] = [];
-  const hint = mapping.dateFormat && mapping.dateFormat !== "auto" ? mapping.dateFormat : undefined;
+  const auto = !mapping.dateFormat || mapping.dateFormat === "auto";
+  const guess = auto
+    ? detectDateFormat(rows.map((r) => r[mapping.date] ?? ""))
+    : { format: mapping.dateFormat as "dmy" | "mdy" | "ymd", ambiguous: false, mixed: false };
+  const hint = guess.format;
   rows.forEach((r, idx) => {
     const date = parseDate(r[mapping.date] ?? "", hint);
     if (!date) {
@@ -99,5 +140,5 @@ export function applyMapping(
     const description = (r[mapping.description] ?? "").replace(/\s+/g, " ").trim() || "(no description)";
     ok.push({ date, amount, description });
   });
-  return { ok, errors };
+  return { ok, errors, dateFormat: { ...guess, detected: auto } };
 }

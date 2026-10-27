@@ -199,11 +199,15 @@ export function AllocationDonut({ slices, size = 180 }: { slices: Slice[]; size?
 export function CashflowChart({
   months,
   height = 220,
+  currency,
 }: {
   months: { month: string; incomeCents: number; expensesCents: number }[];
   height?: number;
+  /** Currency the amounts are in (default: the base currency). */
+  currency?: string;
 }) {
-  const f = useFormat();
+  const base = useFormat();
+  const f = { ...base, units: (v: number, o: Parameters<typeof base.units>[1] = {}) => base.units(v, { ...(currency ? { currency } : {}), ...o }) };
   const data = months.map((m) => ({ month: m.month, income: m.incomeCents / 100, expenses: m.expensesCents / 100 }));
   return (
     <div>
@@ -433,8 +437,9 @@ export function StackedYears({
 }
 
 /** Horizontal bars as plain HTML (one series, one color), value at the tip. */
-export function HBarList({ items }: { items: { label: string; icon?: string | null; cents: number; hint?: string }[] }) {
-  const f = useFormat();
+export function HBarList({ items, currency }: { items: { label: string; icon?: string | null; cents: number; hint?: string }[]; currency?: string }) {
+  const base = useFormat();
+  const f = { ...base, money: (c: number, o: Parameters<typeof base.money>[1] = {}) => base.money(c, { ...(currency ? { currency } : {}), ...o }) };
   const max = Math.max(...items.map((i) => i.cents), 1);
   return (
     <ul className="space-y-2.5">

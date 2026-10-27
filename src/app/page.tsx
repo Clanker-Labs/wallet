@@ -193,7 +193,7 @@ export default async function Dashboard() {
                       {l.status === "ahead_of_pace" && <span className="ml-2"><Badge tone="warning">fast</Badge></span>}
                     </span>
                     <span className="tabular text-ink-2">
-                      {f.money(l.spentCents, { whole: true })} <span className="text-muted">/ {f.money(l.budgetCents!, { whole: true })}</span>
+                      {f.money(l.spentCents, { whole: true, currency: l.currency })} <span className="text-muted">/ {f.money(l.budgetCents!, { whole: true, currency: l.currency })}</span>
                     </span>
                   </div>
                   <Meter pct={l.pct ?? 0} status={l.status === "unbudgeted" ? "ok" : l.status} pace={budget.elapsed} />

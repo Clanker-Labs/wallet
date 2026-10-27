@@ -279,7 +279,11 @@ export const categoryRules = sqliteTable(
   (t) => [uniqueIndex("category_rules_user_pattern").on(t.userId, t.pattern)],
 );
 
-/** Monthly envelope per category, in the user's base currency. */
+/**
+ * Monthly envelope per category, in its own currency (rent in EUR, groceries
+ * in AED). NULL currency = the user's base currency, and follows it if the
+ * base changes.
+ */
 export const budgets = sqliteTable("budgets", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: userId(),
@@ -288,6 +292,7 @@ export const budgets = sqliteTable("budgets", {
     .unique()
     .references(() => categories.id, { onDelete: "cascade" }),
   amountCents: integer("amount_cents").notNull(),
+  currency: text("currency"),
   createdAt: createdAt(),
 });
 

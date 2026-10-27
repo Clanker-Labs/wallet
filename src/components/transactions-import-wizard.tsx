@@ -472,6 +472,14 @@ export function ImportWizard({
               Flip signs (spending shows as positive)
             </label>
           </div>
+          {preview?.dateFormat.detected && (preview.dateFormat.ambiguous || preview.dateFormat.mixed) && (
+            <p className="flex items-start gap-2 text-xs text-ink-2">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0 text-warning" />
+              {preview.dateFormat.mixed
+                ? "Some dates only work day-first and others only month-first. Check the file, then pick the date format."
+                : "Every day in this file is 12 or under, so 03/04 could be 3 April or 4 March. Read as day-first — pick the date format if that's wrong."}
+            </p>
+          )}
           {mostlyPositive && !mapping.invertSign && (
             <p className="flex items-start gap-2 text-xs text-ink-2">
               <AlertTriangle size={13} className="mt-0.5 shrink-0 text-muted" />

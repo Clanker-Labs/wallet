@@ -2,7 +2,8 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { budgetStatus, cashflow, spendingByCategory } from "@/server/services/budgets";
 import { listCategories } from "@/server/services/categories";
-import { today } from "@/server/services/settings";
+import { getSettings, today } from "@/server/services/settings";
+import { COMMON_CURRENCIES, isCurrencyCode, normalizeCurrency } from "@/lib/domain";
 import { serverFormat } from "@/server/format";
 import { addMonths, formatMonth, isMonth, monthBounds } from "@/lib/dates";
 import { Badge, ButtonLink, Card, CardHeader, Meter, PageHeader, Stat } from "@/components/ui";
@@ -14,16 +15,23 @@ import { requireUser } from "@/server/session";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Budgets" };
 
-export default async function BudgetsPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
+export default async function BudgetsPage({ searchParams }: { searchParams: Promise<{ month?: string; currency?: string }> }) {
   const uid = (await requireUser()).id;
   const params = await searchParams;
   const current = today(uid).slice(0, 7);
   const month = params.month && isMonth(params.month) ? params.month : current;
-  const status = budgetStatus(uid, month);
+  const base = getSettings(uid).currency;
+  const wanted = params.currency ? normalizeCurrency(params.currency) : base;
+  const display = isCurrencyCode(wanted) ? wanted : base;
+  const status = budgetStatus(uid, month, { currency: display });
   const { start, end } = monthBounds(month);
-  const spending = spendingByCategory(uid, start, end);
-  const flows = cashflow(uid, 12);
-  const f = serverFormat(uid);
+  const spending = spendingByCategory(uid, start, end, display);
+  const flows = cashflow(uid, 12, display);
+  const sf = serverFormat(uid);
+  /** Amounts in the display currency unless told otherwise. */
+  const f = { ...sf, money: (cents: number, opts: Parameters<typeof sf.money>[1] = {}) => sf.money(cents, { currency: display, ...opts }) };
+  const envelopeCurrencies = [...new Set([...status.currencies, ...COMMON_CURRENCIES.slice(0, 6)])];
+  const qs = (m: string, c = display) => `/budgets?month=${m}${c !== base ? `&currency=${c}` : ""}`;
 
   const budgeted = status.lines.filter((l) => l.budgetCents !== null);
   const unbudgeted = status.lines.filter((l) => l.budgetCents === null);
@@ -38,12 +46,27 @@ export default async function BudgetsPage({ searchParams }: { searchParams: Prom
         subtitle="Monthly envelopes per category. Transfers between your own accounts don't count."
         actions={
           <div className="flex items-center gap-1">
-            <ButtonLink href={`/budgets?month=${addMonths(month, -1)}`} size="sm" variant="ghost" aria-label="Previous month">
+            {status.currencies.length > 1 && (
+              <div role="radiogroup" aria-label="Show amounts in" className="mr-2 inline-flex gap-0.5 rounded-lg bg-surface-2 p-0.5">
+                {status.currencies.map((c) => (
+                  <Link
+                    key={c}
+                    href={qs(month, c)}
+                    role="radio"
+                    aria-checked={c === display}
+                    className={`rounded-md px-2 py-1 text-xs font-medium ${c === display ? "bg-surface text-ink shadow-sm" : "text-ink-2 hover:text-ink"}`}
+                  >
+                    {c}
+                  </Link>
+                ))}
+              </div>
+            )}
+            <ButtonLink href={qs(addMonths(month, -1))} size="sm" variant="ghost" aria-label="Previous month">
               <ChevronLeft size={16} />
             </ButtonLink>
             <span className="min-w-24 text-center text-sm font-medium">{formatMonth(month)}</span>
             <ButtonLink
-              href={`/budgets?month=${addMonths(month, 1)}`}
+              href={qs(addMonths(month, 1))}
               size="sm"
               variant="ghost"
               aria-label="Next month"
@@ -54,6 +77,12 @@ export default async function BudgetsPage({ searchParams }: { searchParams: Prom
           </div>
         }
       />
+
+      {status.missingFx.length > 0 && (
+        <p className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-ink-2">
+          No exchange rate yet for {status.missingFx.join(", ")}: amounts that need one count as 0 until the next rate refresh.
+        </p>
+      )}
 
       <Card>
         <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
@@ -88,16 +117,33 @@ export default async function BudgetsPage({ searchParams }: { searchParams: Prom
                     <Link href={`/transactions?category=${l.categoryId}&from=${start}&to=${end}`} className="hover:underline">
                       {l.name}
                     </Link>
-                    {l.status === "over" && <Badge tone="critical">over by {f.money(-(l.remainingCents ?? 0), { whole: true })}</Badge>}
+                    {l.status === "over" && <Badge tone="critical">over by {f.money(-(l.remainingCents ?? 0), { whole: true, currency: l.currency })}</Badge>}
                     {l.status === "ahead_of_pace" && <Badge tone="warning">spending fast</Badge>}
                   </span>
                   <span className="flex items-center gap-1 text-ink-2">
-                    <span className="tabular font-medium text-ink">{f.money(l.spentCents, { whole: true })}</span>
+                    <span className="tabular font-medium text-ink">{f.money(l.spentCents, { whole: true, currency: l.currency })}</span>
                     <span className="text-muted">/</span>
-                    <InlineAmount cents={l.budgetCents} action={saveBudget} hidden={{ categoryId: l.categoryId! }} />
+                    <InlineAmount
+                      cents={l.budgetCents}
+                      currency={l.currency}
+                      currencies={envelopeCurrencies}
+                      action={saveBudget}
+                      hidden={{ categoryId: l.categoryId! }}
+                    />
                   </span>
                 </div>
                 <Meter pct={l.pct ?? 0} status={l.status === "unbudgeted" ? "ok" : l.status} pace={month === current ? status.elapsed : undefined} />
+                {(l.currency !== display || l.spentByCurrency.length > 0) && (
+                  <p className="tabular mt-1 text-xs text-muted">
+                    {l.spentByCurrency.length > 0 && <>Spent {l.spentByCurrency.map((s) => f.money(s.cents, { whole: true, currency: s.currency })).join(" + ")}</>}
+                    {l.spentByCurrency.length > 0 && l.currency !== display && " · "}
+                    {l.currency !== display && (
+                      <>
+                        ≈ {f.money(l.displaySpentCents, { whole: true })} / {f.money(l.displayBudgetCents ?? 0, { whole: true })}
+                      </>
+                    )}
+                  </p>
+                )}
               </li>
             ))}
           </ul>
@@ -114,7 +160,7 @@ export default async function BudgetsPage({ searchParams }: { searchParams: Prom
                     <span className="flex items-center gap-2">
                       <span className="tabular">{f.money(l.spentCents, { whole: true })}</span>
                       {l.categoryId !== null ? (
-                        <InlineAmount cents={null} action={saveBudget} hidden={{ categoryId: l.categoryId }} placeholder="+ budget" />
+                        <InlineAmount cents={null} currency={display} currencies={envelopeCurrencies} action={saveBudget} hidden={{ categoryId: l.categoryId }} placeholder="+ budget" />
                       ) : (
                         <Link href="/transactions?category=none" className="text-xs text-accent">
                           categorize →
@@ -128,7 +174,7 @@ export default async function BudgetsPage({ searchParams }: { searchParams: Prom
                     <span>
                       {c.icon} {c.name}
                     </span>
-                    <InlineAmount cents={null} action={saveBudget} hidden={{ categoryId: c.id }} placeholder="+ budget" />
+                    <InlineAmount cents={null} currency={display} currencies={envelopeCurrencies} action={saveBudget} hidden={{ categoryId: c.id }} placeholder="+ budget" />
                   </li>
                 ))}
               </ul>
@@ -139,7 +185,7 @@ export default async function BudgetsPage({ searchParams }: { searchParams: Prom
         <Card className="lg:col-span-2">
           <CardHeader title="Where it went" subtitle={formatMonth(month)} />
           {spending.length ? (
-            <HBarList items={spending.map((s) => ({ label: s.name, icon: s.icon, cents: s.spentCents, hint: `${s.sharePct.toFixed(1)}% of spending` }))} />
+            <HBarList items={spending.map((s) => ({ label: s.name, icon: s.icon, cents: s.spentCents, hint: `${s.sharePct.toFixed(1)}% of spending` }))} currency={display} />
           ) : (
             <p className="text-sm text-ink-2">No spending recorded this month.</p>
           )}
@@ -148,7 +194,7 @@ export default async function BudgetsPage({ searchParams }: { searchParams: Prom
 
       <Card>
         <CardHeader title="Last 12 months" subtitle="Income vs expenses" />
-        <CashflowChart months={flows} height={240} />
+        <CashflowChart months={flows} height={240} currency={display} />
       </Card>
     </div>
   );

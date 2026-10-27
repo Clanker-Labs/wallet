@@ -551,3 +551,117 @@ export function AccrualChart({
     </div>
   );
 }
+
+// ── Performance index (rebased to 100) and drawdown ──────────────────────
+
+/** A rebased index (100 = start): the axis reads as a % change. */
+export function IndexChart({ points, height = 240 }: { points: { date: string; value: number }[]; height?: number }) {
+  const up = (points.at(-1)?.value ?? 100) >= 100;
+  const color = up ? "var(--good)" : "var(--critical)";
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+        <CartesianGrid vertical={false} stroke="var(--grid)" />
+        <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={32} />
+        <YAxis {...AXIS} axisLine={false} width={48} domain={["auto", "auto"]} tickFormatter={(v) => `${v - 100 >= 0 ? "+" : ""}${Math.round(v - 100)}%`} />
+        <ReferenceLine y={100} stroke="var(--axis)" strokeDasharray="3 3" />
+        <Tooltip
+          cursor={{ stroke: "var(--axis)", strokeWidth: 1 }}
+          content={({ active, payload }) =>
+            active && payload?.length ? (
+              <TooltipBox
+                title={DateTime.fromISO(String(payload[0].payload.date)).toFormat("d LLL yyyy")}
+                rows={[{ label: "since start", value: `${Number(payload[0].value) - 100 >= 0 ? "+" : ""}${(Number(payload[0].value) - 100).toFixed(2)}%`, color }]}
+              />
+            ) : null
+          }
+        />
+        <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fill={color} fillOpacity={0.08} dot={false} isAnimationActive={false} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function DrawdownChart({ points, height = 140 }: { points: { date: string; pct: number }[]; height?: number }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart data={points} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+        <CartesianGrid vertical={false} stroke="var(--grid)" />
+        <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={32} />
+        <YAxis {...AXIS} axisLine={false} width={48} domain={["dataMin", 0]} tickFormatter={(v) => `${Math.round(v)}%`} />
+        <Tooltip
+          cursor={{ stroke: "var(--axis)", strokeWidth: 1 }}
+          content={({ active, payload }) =>
+            active && payload?.length ? (
+              <TooltipBox
+                title={DateTime.fromISO(String(payload[0].payload.date)).toFormat("d LLL yyyy")}
+                rows={[{ label: "below the peak", value: `${Number(payload[0].value).toFixed(2)}%`, color: "var(--critical)" }]}
+              />
+            ) : null
+          }
+        />
+        <Area type="monotone" dataKey="pct" stroke="var(--critical)" strokeWidth={1.5} fill="var(--critical)" fillOpacity={0.15} dot={false} isAnimationActive={false} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Tiny trend line for a table row. Gaps (no price yet) are skipped. */
+export function Sparkline({ values, width = 88, height = 24 }: { values: number[]; width?: number; height?: number }) {
+  const v = values.filter((x) => Number.isFinite(x));
+  if (v.length < 2) return <span className="text-xs text-muted">—</span>;
+  const min = Math.min(...v);
+  const max = Math.max(...v);
+  const span = max - min || 1;
+  const pts = v.map((x, i) => `${(i / (v.length - 1)) * width},${height - 2 - ((x - min) / span) * (height - 4)}`).join(" ");
+  const up = v.at(-1)! >= v[0];
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Trend ${up ? "up" : "down"} ${(((v.at(-1)! - v[0]) / v[0]) * 100).toFixed(1)}%`}>
+      <polyline points={pts} fill="none" stroke={up ? "var(--good)" : "var(--critical)"} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Months × years grid of returns, coloured by size (capped at ±10%). */
+export function MonthlyReturns({ months }: { months: { month: string; pct: number }[] }) {
+  const years = [...new Set(months.map((m) => m.month.slice(0, 4)))].sort();
+  const byKey = new Map(months.map((m) => [m.month, m.pct]));
+  const names = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+  const cell = (pct: number | undefined) => {
+    if (pct === undefined) return { background: "var(--surface-2)" };
+    const a = Math.min(1, Math.abs(pct) / 10) * 0.85 + 0.1;
+    return { background: `color-mix(in srgb, ${pct >= 0 ? "var(--good)" : "var(--critical)"} ${Math.round(a * 100)}%, var(--surface))` };
+  };
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-separate border-spacing-1 text-xs">
+        <thead>
+          <tr>
+            <th />
+            {names.map((n, i) => (
+              <th key={i} className="font-normal text-muted">
+                {n}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {years.map((y) => (
+            <tr key={y}>
+              <th className="pr-1 text-left font-normal text-muted">{y}</th>
+              {names.map((_, i) => {
+                const k = `${y}-${String(i + 1).padStart(2, "0")}`;
+                const pct = byKey.get(k);
+                return (
+                  <td key={k} className="tabular h-8 min-w-9 rounded-md text-center text-ink" style={cell(pct)} title={pct === undefined ? undefined : `${k}: ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`}>
+                    {pct === undefined ? "" : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}`}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

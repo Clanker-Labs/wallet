@@ -15,6 +15,7 @@ import { matchTransfers } from "@/server/services/transfers";
 import * as recurringSvc from "@/server/services/recurring";
 import * as companiesSvc from "@/server/services/companies";
 import * as taxSvc from "@/server/services/tax";
+import { investmentAnalytics } from "@/server/services/investment-analytics";
 import { getOverview } from "@/server/services/overview";
 import { getSettings, today } from "@/server/services/settings";
 import { purchaseInputSchema, simulatePurchase, capacityInputSchema, borrowingCapacity } from "@/lib/finance/mortgage";
@@ -632,6 +633,18 @@ export const TOOLS = [
     input: z.object({ year: z.number().int().min(2000).max(2100) }),
     readOnly: true,
     run: ({ year }, { userId }) => ({ stays: taxSvc.listPresence(userId, year), ...taxSvc.daysByCountry(userId, `${year}-01-01`, `${year}-12-31`) }),
+  }),
+  tool({
+    name: "get_investment_analytics",
+    title: "Investment analytics",
+    description:
+      "Analytics of the portfolio held today, from daily prices in the base currency (exchange rates included): returns over 1M/3M/6M/YTD/1Y, annual volatility, max drawdown (peak, trough, recovery), Sharpe at 0% risk-free, best/worst day, % of up days, month-by-month returns, per-position weight, returns and 1-year change, allocation by type / currency / region (from the listing exchange) / account, and concentration (top position, top 5, effective number of positions). It describes current positions, not past trades.",
+    input: z.object({ days: z.number().int().min(30).max(1830).default(365) }),
+    readOnly: true,
+    run: ({ days }, { userId }) => {
+      const a = investmentAnalytics(userId, { days });
+      return { ...a, index: a.index.filter((_, i) => i % 7 === 0 || i === a.index.length - 1), drawdown: undefined, actual: undefined, holdings: a.holdings.map(({ spark: _s, ...h }) => h) };
+    },
   }),
   tool({
     name: "list_recurring",

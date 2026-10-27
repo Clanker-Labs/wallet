@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/server/db/client";
 import { accounts, holdings, type Holding } from "@/server/db/schema";
 import { HOLDING_TYPE_KEYS, type HoldingType } from "@/lib/domain";
+import { isISODate } from "@/lib/dates";
 import { currencySchema, getAccountRow, recordBalance, snapshotHoldingAccounts } from "./accounts";
 import { valuationContext, valueHolding, type ValuationContext } from "./valuation";
 import { refreshPrices } from "./prices";
@@ -21,6 +22,11 @@ export const holdingInputSchema = z.object({
   currency: currencySchema.optional().describe("Quote currency (default: the account's currency)"),
   costBasis: z.number().min(0).nullish().describe("Average purchase price per unit, in the quote currency"),
   manualPrice: z.number().min(0).nullish().describe("Price per unit when there's no market symbol (or to override it)"),
+  purchaseDate: z
+    .string()
+    .refine(isISODate, "Expected YYYY-MM-DD")
+    .nullish()
+    .describe("When it was bought (average date): the cost is converted to your currency at that day's rate, so gains split into price and currency"),
 });
 export type HoldingInput = z.input<typeof holdingInputSchema>;
 
@@ -37,6 +43,18 @@ export interface HoldingRow extends Holding {
   /** Unrealized gain vs cost basis, quote currency, cents (null without cost basis). */
   gainCents: number | null;
   gainPct: number | null;
+  /**
+   * The same gain in your base currency, split: price (what the asset did, at
+   * today's rate) and currency (what the exchange rate did since purchase).
+   * The cost uses the rate on purchaseDate, or the day the holding was added.
+   */
+  baseCostCents: number | null;
+  baseGainCents: number | null;
+  baseGainPct: number | null;
+  priceGainBaseCents: number | null;
+  fxGainBaseCents: number | null;
+  /** True when the purchase date is a guess (the day it was added to wallet). */
+  costDateEstimated: boolean;
 }
 
 function getHoldingRow(uid: string, id: number): Holding {
@@ -67,15 +85,26 @@ export function listHoldings(uid: string, opts: { accountId?: number; ctx?: Valu
     const valueCents = Math.round(v.value * 100);
     const cost = h.costBasis !== null && h.costBasis !== undefined ? h.costBasis * h.quantity : null;
     const gain = cost !== null && v.unitPrice !== null ? v.value - cost : null;
+    const baseValueCents = ctx.fx.convertCents(valueCents, h.currency, ctx.base, ctx.today);
+    const costDate = h.purchaseDate ?? new Date(h.createdAt).toISOString().slice(0, 10);
+    const baseCostCents = cost === null ? null : ctx.fx.convertCents(Math.round(cost * 100), h.currency, ctx.base, costDate);
+    const baseGainCents = baseCostCents === null || v.unitPrice === null ? null : baseValueCents - baseCostCents;
+    const priceGainBaseCents = gain === null ? null : ctx.fx.convertCents(Math.round(gain * 100), h.currency, ctx.base, ctx.today);
     return {
       ...h,
       accountName,
       accountCurrency,
       ...v,
       valueCents,
-      baseValueCents: ctx.fx.convertCents(valueCents, h.currency, ctx.base, ctx.today),
+      baseValueCents,
       gainCents: gain === null ? null : Math.round(gain * 100),
       gainPct: gain !== null && cost ? (gain / cost) * 100 : null,
+      baseCostCents,
+      baseGainCents,
+      baseGainPct: baseGainCents !== null && baseCostCents ? (baseGainCents / baseCostCents) * 100 : null,
+      priceGainBaseCents,
+      fxGainBaseCents: baseGainCents !== null && priceGainBaseCents !== null ? baseGainCents - priceGainBaseCents : null,
+      costDateEstimated: !h.purchaseDate,
     };
   });
 }
@@ -89,13 +118,16 @@ export function holdingsSummary(uid: string) {
   let totalCents = 0;
   let costCents = 0;
   let valueWithCostCents = 0;
+  let fxGainCents = 0;
   for (const r of rows) {
     totalCents += r.baseValueCents;
     byType.set(r.assetType, (byType.get(r.assetType) ?? 0) + r.baseValueCents);
     byCurrency.set(r.currency, (byCurrency.get(r.currency) ?? 0) + r.baseValueCents);
-    if (r.costBasis !== null && r.unitPrice !== null) {
-      costCents += ctx.fx.convertCents(Math.round(r.costBasis * r.quantity * 100), r.currency, ctx.base, ctx.today);
+    if (r.baseCostCents !== null && r.unitPrice !== null) {
+      // At the purchase date's rate: the gain includes what the currency did.
+      costCents += r.baseCostCents;
       valueWithCostCents += r.baseValueCents;
+      fxGainCents += r.fxGainBaseCents ?? 0;
     }
   }
   return {
@@ -104,6 +136,8 @@ export function holdingsSummary(uid: string) {
     totalCents,
     gainCents: costCents ? valueWithCostCents - costCents : null,
     gainPct: costCents ? ((valueWithCostCents - costCents) / costCents) * 100 : null,
+    /** Part of the gain that is the exchange rate, not the assets. */
+    fxGainCents: costCents ? fxGainCents : null,
     byType: [...byType.entries()].map(([type, cents]) => ({ type, cents })).sort((a, b) => b.cents - a.cents),
     byCurrency: [...byCurrency.entries()].map(([currency, cents]) => ({ currency, cents })).sort((a, b) => b.cents - a.cents),
     missingPrices: [...ctx.missingPrices],
@@ -130,6 +164,7 @@ export async function upsertHolding(uid: string, raw: HoldingInput, opts: { fetc
     currency: input.currency ?? account.currency,
     costBasis: input.costBasis ?? null,
     manualPrice: input.manualPrice ?? null,
+    purchaseDate: input.purchaseDate ?? null,
   };
   const existing = symbol
     ? db()
@@ -145,6 +180,7 @@ export async function upsertHolding(uid: string, raw: HoldingInput, opts: { fetc
           ...values,
           name: input.name || existing.name,
           costBasis: input.costBasis === undefined ? existing.costBasis : values.costBasis,
+          purchaseDate: input.purchaseDate === undefined ? existing.purchaseDate : values.purchaseDate,
           currency: input.currency ?? existing.currency,
         })
         .where(eq(holdings.id, existing.id))
@@ -174,6 +210,7 @@ export function updateHolding(uid: string, id: number, raw: Partial<HoldingInput
   if (input.quantity !== undefined) patch.quantity = input.quantity;
   if (input.currency !== undefined) patch.currency = input.currency;
   if (input.costBasis !== undefined) patch.costBasis = input.costBasis ?? null;
+  if (input.purchaseDate !== undefined) patch.purchaseDate = input.purchaseDate ?? null;
   if (input.manualPrice !== undefined) patch.manualPrice = input.manualPrice ?? null;
   const updated = db().update(holdings).set(patch).where(eq(holdings.id, current.id)).returning().get();
   snapshotHoldingAccounts(uid);

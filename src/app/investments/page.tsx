@@ -103,11 +103,22 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
       title="Investments"
       subtitle="Stocks, ETFs, funds, bonds, crypto and gold, valued at market prices."
       actions={
-        !adding &&
         summary.rows.length > 0 && (
-          <ButtonLink href={hrefFor(filter?.id ?? null, { add: 1 })} scroll={false} variant="primary">
-            <Plus size={15} /> Add holding
-          </ButtonLink>
+          <div className="flex flex-wrap items-center gap-2">
+            <nav className="inline-flex gap-0.5 rounded-lg bg-surface-2 p-0.5 text-sm" aria-label="Investments views">
+              <span className="rounded-md bg-surface px-3 py-1 font-medium text-ink shadow-sm" aria-current="page">
+                Holdings
+              </span>
+              <Link href="/investments/analytics" className="rounded-md px-3 py-1 text-ink-2 hover:text-ink">
+                Analytics
+              </Link>
+            </nav>
+            {!adding && (
+              <ButtonLink href={hrefFor(filter?.id ?? null, { add: 1 })} scroll={false} variant="primary">
+                <Plus size={15} /> Add holding
+              </ButtonLink>
+            )}
+          </div>
         )
       }
     />
@@ -223,6 +234,7 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
                       </Delta>
                       <span className="text-muted">
                         unrealized
+                        {s.fxGainCents !== null && ` · ${f.money(s.fxGainCents, { whole: true, signed: true })} of it from exchange rates`}
                         {s.withCost < rows.length && ` · on the ${s.withCost} of ${rows.length} positions with a known cost`}
                       </span>
                     </>
@@ -511,6 +523,14 @@ function HoldingRowView({
             {r.gainPct.toFixed(1)}%
           </span>
         )}
+        {showBase && r.baseGainCents !== null && r.fxGainBaseCents !== null && Math.abs(r.fxGainBaseCents) >= 100 && (
+          <span
+            className="tabular ml-1.5 text-xs text-muted lg:ml-0 lg:block"
+            title={`In ${base}: ${moneyIn(r.baseGainCents, base, locale, { signed: true })}, of which ${moneyIn(r.fxGainBaseCents, base, locale, { signed: true })} is the exchange rate since ${r.costDateEstimated ? "you added it" : r.purchaseDate}`}
+          >
+            {moneyIn(r.baseGainCents, base, locale, { signed: true, whole: true })} in {base} · FX {moneyIn(r.fxGainBaseCents, base, locale, { signed: true, whole: true })}
+          </span>
+        )}
       </>
     );
   const formValues = {
@@ -522,6 +542,7 @@ function HoldingRowView({
     quantity: r.quantity,
     currency: r.currency,
     costTotal: r.costBasis === null ? null : r.costBasis * r.quantity,
+    purchaseDate: r.purchaseDate,
     manualPrice: r.manualPrice,
   };
 

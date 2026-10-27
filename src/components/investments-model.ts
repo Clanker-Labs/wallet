@@ -63,6 +63,10 @@ export interface HoldingLike {
   unitPrice: number | null;
   priceDate: string | null;
   priceSource: "market" | "manual" | null;
+  /** Gain in the base currency with the cost at the purchase date's rate, and its currency part. */
+  baseGainCents?: number | null;
+  baseCostCents?: number | null;
+  fxGainBaseCents?: number | null;
 }
 
 /** A market price older than this many days is flagged (covers weekends and a holiday). */
@@ -91,6 +95,8 @@ export interface InvestmentsSummary {
   costCents: number;
   /** Positions the gain covers. */
   withCost: number;
+  /** Part of the gain due to exchange rates since purchase (null when none applies). */
+  fxGainCents: number | null;
   groups: { key: TypeGroupKey; label: string; slot: number; cents: number }[];
   currencies: { currency: string; cents: number }[];
   /** Most recent market quote date across positions. */
@@ -109,6 +115,7 @@ export function summarize(rows: HoldingLike[], today: string): InvestmentsSummar
   let gain = 0;
   let cost = 0;
   let withCost = 0;
+  let fx = 0;
   let latestQuote: string | null = null;
   let missing = 0;
   let stale = 0;
@@ -118,7 +125,12 @@ export function summarize(rows: HoldingLike[], today: string): InvestmentsSummar
     totalCents += r.baseValueCents;
     byType.set(r.assetType, (byType.get(r.assetType) ?? 0) + r.baseValueCents);
     byCurrency.set(r.currency, (byCurrency.get(r.currency) ?? 0) + r.baseValueCents);
-    if (r.gainCents !== null && r.valueCents !== 0) {
+    if (r.baseGainCents != null && r.baseCostCents != null) {
+      gain += r.baseGainCents;
+      cost += r.baseCostCents;
+      fx += r.fxGainBaseCents ?? 0;
+      withCost++;
+    } else if (r.gainCents !== null && r.valueCents !== 0) {
       const rate = r.baseValueCents / r.valueCents;
       gain += r.gainCents * rate;
       cost += (r.valueCents - r.gainCents) * rate;
@@ -141,6 +153,7 @@ export function summarize(rows: HoldingLike[], today: string): InvestmentsSummar
     gainPct: withCost && cost > 0 ? (gain / cost) * 100 : null,
     costCents: Math.round(cost),
     withCost,
+    fxGainCents: withCost && Math.round(fx) !== 0 ? Math.round(fx) : null,
     groups,
     currencies: [...byCurrency.entries()].map(([currency, cents]) => ({ currency, cents })).sort((a, b) => b.cents - a.cents),
     latestQuote,

@@ -28,6 +28,7 @@ export interface HoldingFormValues {
   /** Total paid (cost per unit × quantity), quote currency. */
   costTotal: number | null;
   manualPrice: number | null;
+  purchaseDate?: string | null;
 }
 
 /** Sensible type for a new position, from the account it goes in. */
@@ -406,6 +407,9 @@ export function HoldingForm({
             placeholder="1 234,56"
             autoComplete="off"
           />
+        </Field>
+        <Field label="Bought around (optional)" hint="Average purchase date: separates the currency's effect from the asset's">
+          <Input name="purchaseDate" type="date" defaultValue={holding?.purchaseDate ?? ""} />
         </Field>
         <Field
           label="Manual price per unit (optional)"

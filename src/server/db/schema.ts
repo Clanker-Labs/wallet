@@ -162,6 +162,8 @@ export const holdings = sqliteTable(
     currency: text("currency").notNull().default("USD"),
     /** Average cost per unit, in `currency`. */
     costBasis: real("cost_basis"),
+    /** When it was bought (on average): its cost in your currency uses that day's exchange rate. */
+    purchaseDate: text("purchase_date"),
     /** Price per unit used when there is no market symbol (or to override it). */
     manualPrice: real("manual_price"),
     /** Set when a broker connection owns this position: the next sync overwrites it. */

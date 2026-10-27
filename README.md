@@ -21,13 +21,17 @@ Self-hosted · one SQLite file · passkey sign-in · MIT</p>
 
 - **Net worth** across cash, stocks, retirement, property, crypto, gold and loans. Plotted daily, with a daily-change view and *what moved* it (which accounts, and whether it was the market, a new balance, a loan or a job). Allocation, partly-owned assets, and mortgages that amortize on their own.
 - **Budgets in any currency.** Each envelope has its own currency (rent in EUR, groceries in AED); spending in other currencies counts at that day's rate, and the whole page can be shown in any currency. Moves between your own accounts are matched and kept out of spending.
+- **Recurring payments.** Salary, rent and subscriptions as expectations matched to the real payments from your statements — late ones flagged, price rises noticed, a 90-day cash forecast, never a duplicate.
+- **Companies.** Businesses you own as assets — valued from their books, revenue or profit — with their revenue, spending and profit by month.
+- **Tax by country.** A yearly estimate: UAE and French rules (non-resident rental income, IFI, corporate tax), stays per country for residency.
+- **Goals, splits, tags, smarter rules, loan repayments, sharing with a partner, an audit trail, daily backups with restore, offline reading.**
 - **Jobs and end-of-service gratuity.** Add a job and its gratuity accrues every day as an asset, under the law of its country: UAE (mainland and DIFC/DEWS), Saudi Arabia, Qatar, France, or a rule of your own. Raises, resign-vs-let-go, the next step-up date, and an accrual chart with where it goes if you stay.
 - **Any currency.** USD by default. Every account, holding and transaction keeps its own currency, converted daily with free exchange rates.
 - **Investments.** Stocks, ETFs, funds, crypto and commodities with daily prices and gains. Physical gold takes a manual price.
 - **Brokerage sync.** Connect Trading 212 with a read-only API key: positions, average prices and cash are mirrored hourly. wallet never places an order.
 - **Budgets.** Monthly envelopes with a pace marker, savings rate and cash flow.
 - **Drop a statement, it's imported.** CSV, PDF or a screenshot, anywhere in the app or sent to the Telegram bot. The assistant runs on the Claude API, or on your local `claude` / `codex` login.
-- **MCP & API.** The same 40 tools for Claude Code, Codex, Claude Desktop or plain HTTP. No token needed on localhost.
+- **MCP & API.** The same 64 tools for Claude Code, Codex, Claude Desktop or plain HTTP. No token needed on localhost.
 - **Telegram reminders** re-send until you tap ✅. `/update` asks for one balance at a time.
 - **Simulations** for mortgages, borrowing capacity, buy vs rent, and a net-worth projection.
 - **Passkeys only.** Face ID on your iPhone through a QR code; no passwords, no OAuth. Several users per install, each with private data.

@@ -27,27 +27,28 @@ Earlier in October: a daily net-worth chart with "what moved" (balance, market,
 loan, job or FX), end-of-service gratuity for jobs, and the assistant running
 on Claude Code.
 
-## Next, in order
+## Done in the second round
 
-Sizes: S is up to half a day, M is 1–3 days, L is a week or more.
+| | What |
+|---|---|
+| ✅ | **Recurring payments**: salary, rent and subscriptions are expectations, matched to the real payment when a statement comes in (nothing created on a schedule, nothing counted twice). Late payments, price changes, detection from history, a 90-day cash forecast. Payments recorded by hand are adopted by the statement row instead of duplicated. |
+| ✅ | **FX-aware gains**: a purchase date per holding; gains in your currency split into price and exchange rate. |
+| ✅ | **Investment analytics**: daily index of today's positions, returns by period, volatility, drawdown, Sharpe, monthly heatmap, allocation by type/currency/region/account, concentration. |
+| ✅ | **Backups and restore**: daily `VACUUM INTO`, 14 days + 8 weeks, restore from Settings (safety copy first, sessions kept), import of a JSON export into an empty wallet. |
+| ✅ | **Loan events**: early repayments and renegotiated rates, the schedule replayed. |
+| ✅ | **Account currency changes**: relabel or convert, asked explicitly. |
+| ✅ | **Rules**: starts with / exactly, account, direction, amount range; rename the payee, add a tag. **Splits** and **tags** on transactions. |
+| ✅ | **Tax by country**: UAE (no PIT, corporate 9% with SBR and QFZP, residency test), France (barème with parts, non-resident minimum rate, micro-foncier or réel with loan interest, social charges, IFI, IS), a rate for other countries, stays per country. |
+| ✅ | **Companies** as net-worth assets: book / revenue × / profit × / manual valuation, their own accounts counted through them, revenue, spending and profit by month. |
+| ✅ | **Goals** with what each month needs and the date at your pace. |
+| ✅ | **Sharing** an account with a partner at their share, view or edit; an **audit trail** of every change. |
+| ✅ | **Offline** reading (service worker), gentle motion, skip link and focus rings; reminders follow time-zone changes; sessions and old uploads purged; amounts read in your locale. |
 
-1. **Recurring and subscription detection (M).** Same payee at a regular interval with the amount within ±10%. Shows upcoming bills and the monthly total of subscriptions, and sends a Telegram alert when a price rises. Fixed costs are the first thing anyone asks about. *New `services/recurring.ts`, a tool, a section on Budgets.*
-2. **FX-aware gains on investments (M).** Store each holding's cost in base currency, or its purchase date. A USD ETF bought at 3.67 AED/USD is reported with its currency effect separated out. *`holdings.ts`, schema.*
-3. **Backups and restore (M).** A scheduled `VACUUM INTO` with retention, restore from Settings, and import of the JSON export. A finance app without a restore path isn't trustworthy. *New `services/backup.ts`, settings page, background loop.*
-4. **Loan events (M).** Early repayments, rate renegotiations and payment holidays as a list of events, with the schedule recomputed per segment. This covers French mortgages (renégociation, remboursement anticipé). Now that recorded balances are refused, this is how a loan's real balance gets corrected. *`lib/finance/loan.ts`, `accounts.ts`, form.*
-5. **Bank presets for statements (S–M).** Saved column mappings per bank (Emirates NBD, ADCB, Mashreq, BoursoBank, Revolut, Wise), recognised from the file's headers, plus a PDF-to-rows prompt for UAE banks, which have no open-banking API. *`csv-import.ts`, `agent/attachments.ts`.*
-6. **EU bank sync with GoCardless Bank Account Data (L).** A free tier that covers BoursoBank, BNP, Revolut and Wise. It needs a transactions connector type next to today's positions-only one. *`connectors/`, `connections.ts`.*
-7. **Account currency changes (S).** Changing an account's currency today re-reads all its history in the new currency. Ask whether it's a relabel or a conversion, and convert snapshots at their dates. *`accounts.ts`, form.*
-8. **Rules beyond "contains" (M).** Conditions on amount and account, payee renaming, splits, and tags. *`categories.ts`, schema, transactions UI.*
-9. **Cross-border tax view (M).** Per year: French-source income for a non-resident (20% minimum rate, 7.5% vs 17.2% social charges), an IFI estimate above €1.3M of French property, a UAE day counter for tax residency, and a yearly CSV/PDF. *New `services/tax.ts`, `app/reports`.*
-10. **Goals and sinking funds (M).** Target, date and linked accounts, a monthly amount needed, and a projection from cash flow. *New service, dashboard card.*
-11. **Household sharing and an audit log (L).** Accounts shared with a partner, each with an owner and percentage, and a `changes` table written by the services. Users are fully isolated today. *Schema, every write path.*
-12. **PWA offline mode and an accessibility pass (M).** The manifest exists but there's no service worker. Do a keyboard and screen-reader audit of the charts and inline editors.
+## Still to do
 
-Small items to pick up along the way:
-- Reschedule reminders when the time zone changes.
-- Purge expired sessions and old uploads.
-- Escape `%` and `_` in transaction search.
-- `parseAmount("1.500")` should read 1500 when the locale says so.
-- The month list on the transactions page should use the user's time zone.
-- Telegram alert when an envelope goes over.
+1. **Bank presets for statements** (Emirates NBD, ADCB, Mashreq, BoursoBank, Revolut, Wise) and a PDF-to-rows prompt for UAE banks.
+2. **EU bank sync with GoCardless Bank Account Data**: a transactions connector next to today's positions-only one.
+3. **Trades and dividends** for investments, so returns can be money-weighted (today: positions only).
+4. **Tax**: plafonnement du quotient familial, the average-rate option for non-residents, treaty credits, more countries.
+5. **Shared transactions** between partners (today: shared balances, private transactions).
+

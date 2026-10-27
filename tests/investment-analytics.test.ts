@@ -65,4 +65,19 @@ describe("investment analytics", () => {
     expect(regionOf({ symbol: "AAPL", assetType: "stock" })).toBe("United States");
     expect(regionOf({ symbol: "BTC-USD", assetType: "crypto" })).toBe("Crypto");
   });
+
+  it("doesn't let a small position with history stand in for the whole portfolio", async () => {
+    const b = createAccount(uid, { name: "Broker", type: "brokerage", currency: "USD" });
+    series("OLD", 60, (i) => 100 - i); // history, falling — but tiny
+    series("NEW", 0, () => 100); // today only — and most of the value
+    await upsertHolding(uid, { accountId: b.id, symbol: "OLD", quantity: 1, currency: "USD" }, { fetchPrice: false });
+    await upsertHolding(uid, { accountId: b.id, symbol: "NEW", quantity: 100, currency: "USD" }, { fetchPrice: false });
+    const a = investmentAnalytics(uid, { days: 60 });
+    expect(a.enoughHistory).toBe(false);
+    expect(a.since).toBe(T);
+    expect(a.periods.every((p) => p.returnPct === null)).toBe(true);
+    expect(a).toMatchObject({ volatilityPct: null, maxDrawdown: null, index: [], monthly: [] });
+    expect(a.excluded).toEqual(["NEW"]);
+    expect(a.holdings.find((h) => h.symbol === "OLD")!.returns["1m"]).toBeLessThan(0); // its own history still shows
+  });
 });

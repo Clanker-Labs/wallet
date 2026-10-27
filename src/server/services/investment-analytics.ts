@@ -42,6 +42,12 @@ export interface InvestmentAnalytics {
   base: string;
   asOf: string;
   totalCents: number;
+  /** First day the figures cover: when ≥80% of today's portfolio (by value) had prices. */
+  since: string;
+  /** Share of today's portfolio priced on that day (%). */
+  coveragePct: number;
+  /** False when there is too little common history for returns and risk to mean anything. */
+  enoughHistory: boolean;
   index: { date: string; value: number }[];
   drawdown: { date: string; pct: number }[];
   actual: { date: string; netCents: number }[];
@@ -99,6 +105,9 @@ const stdev = (xs: number[]) => {
   return Math.sqrt(xs.reduce((s, x) => s + (x - m) ** 2, 0) / (xs.length - 1));
 };
 
+/** Share of today's portfolio (by value) that must have prices for a day to count. */
+const MIN_COVERAGE = 0.8;
+
 export function investmentAnalytics(uid: string, opts: { days?: number } = {}): InvestmentAnalytics {
   const ctx = valuationContext(uid);
   const t = ctx.today;
@@ -132,9 +141,21 @@ export function investmentAnalytics(uid: string, opts: { days?: number } = {}): 
     return ctx.fx.convert(unit, h.currency, ctx.base, date);
   };
 
-  const dates: string[] = [];
-  for (let d = from; d <= t; d = addDays(d, 1)) dates.push(d);
-  const series = new Map<number, (number | null)[]>(rows.map((h) => [h.id, dates.map((d) => unitBase(h, d))]));
+  const allDates: string[] = [];
+  for (let d = from; d <= t; d = addDays(d, 1)) allDates.push(d);
+  const allSeries = new Map<number, (number | null)[]>(rows.map((h) => [h.id, allDates.map((d) => unitBase(h, d))]));
+
+  // Only describe the portfolio from the first day most of it (by today's value) has prices:
+  // otherwise one small position with history would stand in for all of it.
+  const weightOf = new Map(rows.map((h) => [h.id, totalCents ? h.baseValueCents / totalCents : 0]));
+  const coverage = allDates.map((_, i) => rows.reduce((s, h) => s + (allSeries.get(h.id)![i] !== null ? weightOf.get(h.id)! : 0), 0));
+  let startIdx = coverage.findIndex((c) => c >= MIN_COVERAGE);
+  if (startIdx < 0) startIdx = allDates.length - 1;
+  const dates = allDates.slice(startIdx);
+  const series = new Map<number, (number | null)[]>(rows.map((h) => [h.id, allSeries.get(h.id)!.slice(startIdx)]));
+  const since = dates[0];
+  const coveragePct = Math.round((coverage[startIdx] ?? 0) * 1000) / 10;
+  const enoughHistory = dates.length >= 20;
 
   // Chain-linked index: each day's return over the positions priced on both days.
   const index: { date: string; value: number }[] = [];
@@ -178,13 +199,13 @@ export function investmentAnalytics(uid: string, opts: { days?: number } = {}): 
     ["1y", "1Y", T.minus({ years: 1 }).toISODate()!],
   ];
   const periods = refs.map(([key, label, d]) => {
-    const v = d >= from ? at(d) : null;
+    const v = d >= since ? at(d) : null;
     return { key, label, returnPct: v ? Math.round((now / v - 1) * 10000) / 100 : null };
   });
 
   // Risk.
   const rs = dailyReturns.map((x) => x.r);
-  const vol = rs.length >= 20 ? stdev(rs) * Math.sqrt(252) : null;
+  const vol = enoughHistory && rs.length >= 20 ? stdev(rs) * Math.sqrt(252) : null;
   let peak = index[0]?.value ?? 100;
   let peakDate = index[0]?.date ?? t;
   let mdd: InvestmentAnalytics["maxDrawdown"] = null;
@@ -207,7 +228,7 @@ export function investmentAnalytics(uid: string, opts: { days?: number } = {}): 
   const yearReturn = periods.find((p) => p.key === "1y")?.returnPct ?? null;
   const spanYears = Math.max(1 / 12, (DateTime.fromISO(t).diff(DateTime.fromISO(index.find((p) => p.value !== 100)?.date ?? from), "days").days || 1) / 365);
   const annualized = yearReturn ?? ((now / 100) ** (1 / spanYears) - 1) * 100;
-  const sharpe = vol && vol > 0 && rs.length >= 20 ? Math.round((annualized / 100 / vol) * 100) / 100 : null;
+  const sharpe = vol && vol > 0 && rs.length >= 20 && yearReturn !== null ? Math.round((annualized / 100 / vol) * 100) / 100 : null;
 
   // Month by month.
   const monthly: { month: string; pct: number }[] = [];
@@ -224,9 +245,10 @@ export function investmentAnalytics(uid: string, opts: { days?: number } = {}): 
   const excluded: string[] = [];
   const yearAgoIdx = 0;
   const holdings: HoldingAnalytics[] = rows.map((h) => {
-    const s = series.get(h.id)!;
+    // Each position over its own full history, whatever the portfolio's start.
+    const s = allSeries.get(h.id)!;
     const valueAt = (d: string) => {
-      const i = dates.indexOf(d);
+      const i = allDates.indexOf(d);
       return i >= 0 ? s[i] : null;
     };
     const last = s.at(-1);
@@ -236,7 +258,7 @@ export function investmentAnalytics(uid: string, opts: { days?: number } = {}): 
       returns[key] = v && last ? Math.round((last / v - 1) * 10000) / 100 : null;
     }
     const first = s[yearAgoIdx];
-    if (first === null && !h.manualPrice) excluded.push(h.symbol ?? h.name);
+    if (first === null && !h.manualPrice && h.baseValueCents > 0) excluded.push(h.symbol ?? h.name);
     const step = Math.max(1, Math.floor(s.length / 52));
     return {
       id: h.id,
@@ -275,8 +297,8 @@ export function investmentAnalytics(uid: string, opts: { days?: number } = {}): 
     ? db().select().from(accounts).where(and(eq(accounts.userId, uid), inArray(accounts.id, holdingAccountIds))).all()
     : [];
   const snaps = snapshotsByAccount(uid, holdingAccountIds);
-  const actual = dates
-    .filter((_, i) => i % 7 === 0 || i === dates.length - 1)
+  const actual = allDates
+    .filter((_, i) => i % 7 === 0 || i === allDates.length - 1)
     .map((d) => ({
       date: d,
       netCents: accs.reduce((s, a) => s + (a.archivedAt && a.archivedAt <= d ? 0 : withBalance(a, snaps.get(a.id) ?? [], d, ctx).baseOwnedCents), 0),
@@ -286,17 +308,20 @@ export function investmentAnalytics(uid: string, opts: { days?: number } = {}): 
     base: ctx.base,
     asOf: t,
     totalCents,
-    index,
-    drawdown,
+    since,
+    coveragePct,
+    enoughHistory,
+    index: enoughHistory ? index : [],
+    drawdown: enoughHistory ? drawdown : [],
     actual,
     periods,
     volatilityPct: vol === null ? null : Math.round(vol * 10000) / 100,
-    maxDrawdown: mdd,
-    bestDay: best ? { date: best.date, pct: Math.round(best.r * 10000) / 100 } : null,
-    worstDay: worst ? { date: worst.date, pct: Math.round(worst.r * 10000) / 100 } : null,
+    maxDrawdown: enoughHistory ? mdd : null,
+    bestDay: enoughHistory && best ? { date: best.date, pct: Math.round(best.r * 10000) / 100 } : null,
+    worstDay: enoughHistory && worst ? { date: worst.date, pct: Math.round(worst.r * 10000) / 100 } : null,
     sharpe,
-    upDaysPct: rs.length ? Math.round((rs.filter((r) => r > 0).length / rs.length) * 1000) / 10 : null,
-    monthly,
+    upDaysPct: enoughHistory && rs.length ? Math.round((rs.filter((r) => r > 0).length / rs.length) * 1000) / 10 : null,
+    monthly: enoughHistory ? monthly : [],
     holdings,
     allocation: { byType: slices(typeMap, totalCents), byCurrency: slices(curMap, totalCents), byRegion: slices(regMap, totalCents), byAccount: slices(accMap, totalCents) },
     concentration: rows.length ? { top1Pct: (weights[0] ?? 0) * 100, top5Pct: weights.slice(0, 5).reduce((a, b) => a + b, 0) * 100, effectiveHoldings: hhi ? Math.round((1 / hhi) * 10) / 10 : 0 } : null,

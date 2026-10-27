@@ -24,6 +24,7 @@ export async function refreshMarketData(opts: { fetchImpl?: typeof fetch } = {})
     const prices = await refreshPrices({ fetchImpl: opts.fetchImpl });
     const priceHistory = await ensurePriceHistory({ fetchImpl: opts.fetchImpl });
     if (priceHistory.updated.length) log.push(`📈 a year of prices for: ${priceHistory.updated.join(", ")}`);
+    if (priceHistory.failed.length) log.push(`⚠️ price history: ${priceHistory.failed[0].error}${priceHistory.failed.length > 1 ? ` (+${priceHistory.failed.length - 1} more)` : ""}, retried later`);
     if (prices.updated.length) log.push(`📈 prices updated: ${prices.updated.join(", ")}`);
     if (prices.failed.length) log.push(`⚠️ prices: ${prices.failed.map((f) => f.error).join("; ")}`);
     log.push(...(await syncStaleConnections({ fetchImpl: opts.fetchImpl })).log);

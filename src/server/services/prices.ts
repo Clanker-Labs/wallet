@@ -193,7 +193,8 @@ let lastHistory = 0;
 /**
  * A year of daily prices for every held symbol that has less. Positions
  * synced from a broker arrive with today's price only, and analytics, history
- * and drawdowns need the year. Twice a day at most; never throws.
+ * and drawdowns need the year. Twice a day at most, one symbol at a time,
+ * stopping when the source says to slow down; never throws.
  */
 export async function ensurePriceHistory(opts: { force?: boolean; fetchImpl?: FetchLike } = {}) {
   if (!opts.force && Date.now() - lastHistory < 12 * 3_600_000) return { updated: [] as string[], failed: [] as { symbol: string; error: string }[] };
@@ -209,5 +210,16 @@ export async function ensurePriceHistory(opts: { force?: boolean; fetchImpl?: Fe
       .all(cutoff) as { symbol: string }[]
   ).map((r) => r.symbol);
   if (!thin.length) return { updated: [], failed: [] };
-  return refreshPrices({ symbols: thin.slice(0, 40), range: "1y", fetchImpl: opts.fetchImpl });
+  // Politely: one symbol at a time with a pause, and stop at the first "too many requests" —
+  // the rest wait for the next run rather than hammering the source.
+  const updated: string[] = [];
+  const failed: { symbol: string; error: string }[] = [];
+  for (const [i, symbol] of thin.slice(0, 40).entries()) {
+    if (i > 0 && !opts.fetchImpl) await new Promise((r) => setTimeout(r, 1_500));
+    const r = await refreshPrices({ symbols: [symbol], range: "1y", fetchImpl: opts.fetchImpl });
+    updated.push(...r.updated);
+    failed.push(...r.failed);
+    if (r.failed.some((f) => / 429$/.test(f.error))) break;
+  }
+  return { updated, failed };
 }

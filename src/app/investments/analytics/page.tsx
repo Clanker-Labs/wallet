@@ -80,12 +80,21 @@ export default async function InvestmentAnalyticsPage() {
                 ))}
               </div>
             </div>
-            <div className="mt-5">
-              <IndexChart points={a.index} />
-            </div>
+            {a.enoughHistory ? (
+              <div className="mt-5">
+                <IndexChart points={a.index} />
+              </div>
+            ) : (
+              <p className="mt-5 rounded-lg bg-surface/70 px-4 py-6 text-center text-sm text-ink-2">
+                Not enough price history yet for most of your portfolio to measure returns and risk honestly. wallet is fetching a year of prices
+                for {a.excluded.slice(0, 6).join(", ")}
+                {a.excluded.length > 6 ? ` and ${a.excluded.length - 6} more` : ""}; the figures appear as soon as it has them.
+              </p>
+            )}
             <p className="mt-2 text-xs text-muted">
-              Today&apos;s positions over the last year, in {a.base} (exchange rates included). It shows what these holdings did, not past trades.
-              {a.excluded.length > 0 && ` Not enough price history yet for ${a.excluded.join(", ")}.`}
+              Today&apos;s positions in {a.base} (exchange rates included){a.enoughHistory && `, since ${day(a.since)}, when ${a.coveragePct.toFixed(0)}% of today's portfolio had prices`}.
+              It shows what these holdings did, not past trades.
+              {a.enoughHistory && a.excluded.length > 0 && ` Not enough price history yet for ${a.excluded.join(", ")}.`}
             </p>
           </Card>
 

@@ -15,6 +15,7 @@ import {
 import { toCents } from "@/lib/money";
 import { addDays, isISODate } from "@/lib/dates";
 import { loanBalanceOn } from "@/lib/finance/loan";
+import { gratuityOn, gratuityParamsSchema } from "@/lib/finance/gratuity";
 import { getSettings, today } from "./settings";
 import { holdingsValueCents, valuationContext, type ValuationContext } from "./valuation";
 
@@ -42,6 +43,7 @@ export const accountInputSchema = z.object({
   includeInNetWorth: z.boolean().default(true),
   linkedAccountId: z.number().int().nullish(),
   loanParams: loanParamsSchema.nullish(),
+  gratuityParams: gratuityParamsSchema.nullish().describe("For a job (type end_of_service): country, dates and salary the gratuity is computed from"),
   notes: z.string().max(2000).nullish(),
   initialBalance: z.number().optional().describe("Current balance in the account currency, recorded as of today"),
 });
@@ -58,6 +60,8 @@ export interface AccountWithBalance extends Account {
   netCents: number;
   lastUpdated: string | null;
   derivedFromLoan: boolean;
+  /** A job: the balance is the end-of-service gratuity accrued under its country's law. */
+  derivedFromJob: boolean;
   /** Value comes from holdings (stocks, ETFs…) × market prices. */
   valuedByHoldings: boolean;
   holdingsCount: number;
@@ -65,6 +69,7 @@ export interface AccountWithBalance extends Account {
 
 export function createAccount(uid: string, raw: AccountInput): Account {
   const input = accountInputSchema.parse(raw);
+  if (input.type === "end_of_service" && !input.gratuityParams) throw new Error("A job needs its country, start date and salary (gratuityParams).");
   const assetClass: AssetClass = input.assetClass ?? assetClassFor(input.type);
   if (input.linkedAccountId) getAccountRow(uid, input.linkedAccountId);
   const account = db()
@@ -80,11 +85,12 @@ export function createAccount(uid: string, raw: AccountInput): Account {
       includeInNetWorth: input.includeInNetWorth,
       linkedAccountId: input.linkedAccountId ?? null,
       loanParams: input.loanParams ?? null,
+      gratuityParams: input.gratuityParams ?? null,
       notes: input.notes ?? null,
     })
     .returning()
     .get();
-  if (input.initialBalance !== undefined && !input.loanParams) {
+  if (input.initialBalance !== undefined && !input.loanParams && !input.gratuityParams) {
     recordBalance(uid, { accountId: account.id, balance: input.initialBalance, source: "manual" });
   }
   return account;
@@ -108,6 +114,7 @@ export function updateAccount(uid: string, id: number, raw: Partial<AccountInput
     patch.linkedAccountId = input.linkedAccountId ?? null;
   }
   if (input.loanParams !== undefined) patch.loanParams = input.loanParams ?? null;
+  if (input.gratuityParams !== undefined) patch.gratuityParams = input.gratuityParams ?? null;
   if (input.notes !== undefined) patch.notes = input.notes ?? null;
   return db()
     .update(accounts)
@@ -178,6 +185,8 @@ function writeSnapshot(accountId: number, date: string, cents: number, note: str
 export function recordBalance(uid: string, raw: z.input<typeof recordBalanceSchema>) {
   const input = recordBalanceSchema.parse(raw);
   const account = getAccountRow(uid, input.accountId);
+  if (account.gratuityParams && input.balance !== 0)
+    throw new Error(`${account.name} is a job: its balance is the gratuity computed from its salary and dates. Edit the job instead, or archive it once the gratuity is paid out.`);
   const date = input.date ?? today(uid);
   const balance = isLiability(account.assetClass) ? Math.abs(input.balance) : input.balance;
   const balanceCents = toCents(balance);
@@ -233,11 +242,18 @@ type Snap = { date: string; balanceCents: number };
 
 /** Balance of one account on a date, in its own currency. */
 export function balanceOnDate(
-  account: Pick<Account, "id" | "currency" | "loanParams">,
+  account: Pick<Account, "id" | "currency" | "loanParams"> & Partial<Pick<Account, "gratuityParams">>,
   snapshots: Snap[],
   date: string,
   ctx: ValuationContext,
-): { cents: number; lastUpdated: string | null; derived: "loan" | "holdings" | null } {
+): { cents: number; lastUpdated: string | null; derived: "loan" | "job" | "holdings" | null } {
+  if (account.gratuityParams) {
+    // Paid out: a zero snapshot (archiving records one) ends the accrual.
+    const paid = snapshots.findLast((s) => s.date <= date && s.balanceCents === 0);
+    if (paid) return { cents: 0, lastUpdated: paid.date, derived: null };
+    if (date < account.gratuityParams.startDate) return { cents: 0, lastUpdated: null, derived: "job" };
+    return { cents: toCents(gratuityOn(account.gratuityParams, date).amount), lastUpdated: date, derived: "job" };
+  }
   if (account.loanParams) {
     // A closed loan's archive snapshot (0) wins over the schedule.
     const closing = snapshots.findLast((s) => s.date <= date && s.balanceCents === 0);
@@ -275,6 +291,7 @@ export function withBalance(account: Account, snapshots: Snap[], date: string, c
     netCents: account.includeInNetWorth ? sign * baseOwnedCents : 0,
     lastUpdated: b.lastUpdated,
     derivedFromLoan: b.derived === "loan",
+    derivedFromJob: b.derived === "job",
     valuedByHoldings: b.derived === "holdings",
     holdingsCount: ctx.holdingsByAccount.get(account.id)?.length ?? 0,
   };
@@ -360,6 +377,7 @@ export function staleAccounts(uid: string, days = 35): AccountWithBalance[] {
   return listAccounts(uid).filter(
     (a) =>
       !a.derivedFromLoan &&
+      !a.derivedFromJob &&
       !a.valuedByHoldings &&
       a.includeInNetWorth &&
       (a.lastUpdated === null || a.lastUpdated < cutoff),

@@ -1,0 +1,1 @@
+ALTER TABLE `accounts` ADD `gratuity_params` text;

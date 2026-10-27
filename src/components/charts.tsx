@@ -73,6 +73,7 @@ export function Legend({ items }: { items: { label: string; color: string; kind?
 }
 
 const shortMonth = (iso: string) => DateTime.fromISO(iso).toFormat("LLL yy");
+const shortDay = (iso: string) => DateTime.fromISO(iso).toFormat("d LLL");
 
 // ── Net worth over time ──────────────────────────────────────────────────
 
@@ -80,11 +81,14 @@ export function NetWorthChart({
   points,
   height = 260,
   label = "Net worth",
+  dayTicks = false,
 }: {
   points: { date: string; netCents: number }[];
   height?: number;
   /** Series name in the tooltip (e.g. "Balance" on an account page). */
   label?: string;
+  /** Label the axis with days ("12 Oct") instead of months, for short ranges. */
+  dayTicks?: boolean;
 }) {
   const f = useFormat();
   const data = points.map((p) => ({ date: p.date, net: p.netCents / 100 }));
@@ -100,7 +104,7 @@ export function NetWorthChart({
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
         <CartesianGrid vertical={false} stroke="var(--grid)" />
-        <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={24} />
+        <XAxis dataKey="date" {...AXIS} tickFormatter={dayTicks ? shortDay : shortMonth} minTickGap={24} />
         <YAxis
           {...AXIS}
           axisLine={false}
@@ -449,5 +453,96 @@ export function HBarList({ items }: { items: { label: string; icon?: string | nu
         </li>
       ))}
     </ul>
+  );
+}
+
+// ── Daily change (net worth moves, one bar per day) ──────────────────────
+
+export function DailyChangeChart({ points, height = 260 }: { points: { date: string; deltaCents: number }[]; height?: number }) {
+  const f = useFormat();
+  const data = points.map((p) => ({ date: p.date, delta: p.deltaCents / 100 }));
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="12%">
+        <CartesianGrid vertical={false} stroke="var(--grid)" />
+        <XAxis dataKey="date" {...AXIS} tickFormatter={shortDay} minTickGap={24} />
+        <YAxis {...AXIS} axisLine={false} width={64} tickFormatter={(v) => f.units(v, { compact: true })} />
+        <ReferenceLine y={0} stroke="var(--axis)" />
+        <Tooltip
+          cursor={{ fill: "var(--surface-2)" }}
+          content={({ active, payload }) =>
+            active && payload?.length ? (
+              <TooltipBox
+                title={DateTime.fromISO(String(payload[0].payload.date)).toFormat("cccc d LLL yyyy")}
+                rows={[
+                  {
+                    label: "that day",
+                    value: f.units(Number(payload[0].value), { whole: true, signed: true }),
+                    color: Number(payload[0].value) >= 0 ? "var(--good)" : "var(--critical)",
+                    kind: "rect",
+                  },
+                ]}
+              />
+            ) : null
+          }
+        />
+        <Bar dataKey="delta" maxBarSize={14} radius={[2, 2, 2, 2]} isAnimationActive={false}>
+          {data.map((d) => (
+            <Cell key={d.date} fill={d.delta >= 0 ? "var(--good)" : "var(--critical)"} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ── Gratuity accrual (accrued so far, projected if you stay) ─────────────
+
+export function AccrualChart({
+  points,
+  currency,
+  height = 200,
+}: {
+  points: { date: string; accrued?: number; projected?: number }[];
+  /** The job's own currency (gratuity is owed in it). */
+  currency: string;
+  height?: number;
+}) {
+  const f = useFormat();
+  const fmt = (v: number, compact = false) => f.units(v, { currency, whole: true, compact });
+  const hasProjection = points.some((p) => p.projected !== undefined);
+  return (
+    <div>
+      {hasProjection && (
+        <Legend
+          items={[
+            { label: "Accrued", color: "var(--series-3)", kind: "line" },
+            { label: "If you stay", color: "color-mix(in srgb, var(--series-3) 55%, transparent)", kind: "line" },
+          ]}
+        />
+      )}
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid vertical={false} stroke="var(--grid)" />
+          <XAxis dataKey="date" {...AXIS} tickFormatter={shortMonth} minTickGap={32} />
+          <YAxis {...AXIS} axisLine={false} width={64} tickFormatter={(v) => fmt(v, true)} />
+          <Tooltip
+            cursor={{ stroke: "var(--axis)", strokeWidth: 1 }}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const p = payload[0].payload as (typeof points)[number];
+              const rows: TooltipRow[] = [];
+              if (p.accrued !== undefined) rows.push({ label: "accrued", value: fmt(p.accrued), color: "var(--series-3)" });
+              else if (p.projected !== undefined) rows.push({ label: "if you stay", value: fmt(p.projected), color: "var(--series-3)" });
+              return <TooltipBox title={DateTime.fromISO(p.date).toFormat("d LLL yyyy")} rows={rows} />;
+            }}
+          />
+          <Area type="linear" dataKey="accrued" stroke="var(--series-3)" strokeWidth={2} fill="var(--series-3)" fillOpacity={0.1} dot={false} isAnimationActive={false} />
+          {hasProjection && (
+            <Line type="linear" dataKey="projected" stroke="var(--series-3)" strokeOpacity={0.55} strokeWidth={2} strokeDasharray="5 4" dot={false} isAnimationActive={false} />
+          )}
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
   );
 }

@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { AlertCircle, ArrowRight, Bell, Clock, CircleDollarSign, LineChart, Tag } from "lucide-react";
 import { getOverview } from "@/server/services/overview";
-import { netWorthHistory } from "@/server/services/networth";
+import { netWorthDaily, netWorthHistory, netWorthMoves } from "@/server/services/networth";
 import { serverFormat } from "@/server/format";
 import { ASSET_CLASS_LABELS, ASSET_CLASS_SLOT, type AssetClass } from "@/lib/domain";
 import { formatMonth } from "@/lib/dates";
 import { Badge, ButtonLink, Card, CardHeader, Delta, EmptyState, Meter, SeriesDot, Stat } from "@/components/ui";
-import { AllocationDonut, CashflowChart, NetWorthChart } from "@/components/charts";
+import { AllocationDonut, CashflowChart } from "@/components/charts";
+import { MoversCard, NetWorthPanel } from "@/components/networth-ui";
 import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +26,9 @@ export default async function Dashboard() {
   const o = getOverview(uid);
   const f = serverFormat(uid);
   const nw = o.netWorth;
-  const history = netWorthHistory(uid, 24);
+  const history = netWorthHistory(uid, 120);
+  const daily = netWorthDaily(uid, 365);
+  const { moves } = netWorthMoves(uid);
 
   if (nw.accounts.length === 0) {
     return (
@@ -66,7 +69,7 @@ export default async function Dashboard() {
             <div className="text-sm text-muted">Net worth · {nw.currency}</div>
             <div className="mt-1 text-5xl font-semibold tracking-tight">{f.money(nw.netCents, { whole: true })}</div>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
-              {o.changes.map((c) => (
+              {moves.map((c) => (
                 <span key={c.label} className="inline-flex items-center gap-1.5">
                   <Delta value={c.deltaCents}>
                     {f.money(c.deltaCents, { whole: true, signed: true })}
@@ -83,8 +86,17 @@ export default async function Dashboard() {
           </div>
         </div>
         <div className="mt-6">
-          <NetWorthChart points={history} />
+          <NetWorthPanel
+            daily={daily.map((p) => ({ date: p.date, netCents: p.netCents }))}
+            monthly={history.map((p) => ({ date: p.date, netCents: p.netCents }))}
+          />
         </div>
+      </Card>
+
+      {/* What moved */}
+      <Card>
+        <CardHeader title="What moved" subtitle="The accounts behind the change, biggest first" />
+        <MoversCard moves={moves} />
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-5">

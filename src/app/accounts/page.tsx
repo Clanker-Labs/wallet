@@ -212,7 +212,7 @@ function shortTypeLabel(type: AccountWithBalance["type"]) {
 }
 
 function isStale(a: AccountWithBalance, t: string) {
-  if (a.derivedFromLoan || a.valuedByHoldings || !a.includeInNetWorth) return false;
+  if (a.derivedFromLoan || a.derivedFromJob || a.valuedByHoldings || !a.includeInNetWorth) return false;
   return a.lastUpdated === null || daysBetween(a.lastUpdated, t) > STALE_DAYS;
 }
 
@@ -238,8 +238,8 @@ function AccountRow({ a, t, base, locale }: { a: AccountWithBalance; t: string; 
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted">
           {meta && <span>{meta}</span>}
-          {meta && !a.derivedFromLoan && !(a.valuedByHoldings && !days) && <span aria-hidden>·</span>}
-          {a.derivedFromLoan ? null : a.valuedByHoldings ? (
+          {meta && !a.derivedFromLoan && !a.derivedFromJob && !(a.valuedByHoldings && !days) && <span aria-hidden>·</span>}
+          {a.derivedFromLoan || a.derivedFromJob ? null : a.valuedByHoldings ? (
             // Valued live from holdings: only an old price is worth a mention.
             days ? <span>prices {updatedLabel(days).replace("updated ", "")}</span> : null
           ) : stale ? (
@@ -263,6 +263,11 @@ function AccountRow({ a, t, base, locale }: { a: AccountWithBalance; t: string; 
           <span className="text-right text-xs text-muted" title="The balance follows the amortization schedule">
             auto · amortizing
           </span>
+        ) : a.derivedFromJob ? (
+          <Link href="/jobs" className="text-right text-xs leading-snug text-accent hover:underline" title="The balance is the end-of-service gratuity accrued so far">
+            <span className="block">auto ·</span>
+            gratuity
+          </Link>
         ) : a.valuedByHoldings ? (
           <Link
             href={`/investments?account=${a.id}`}

@@ -55,7 +55,7 @@ const SQL_SCHEMA = `Tables (only your data; amounts are INTEGER cents in the row
 - transactions(id, account_id, date, amount_cents [negative = spending], currency, description, category_id, notes, source)
 - categories(id, name, kind ['income','expense','transfer'], icon)
 - category_rules(id, pattern, category_id) — lowercase substring of description → category
-- budgets(id, category_id, amount_cents) — monthly envelope in the base currency
+- budgets(id, category_id, amount_cents, currency) — monthly envelope; currency NULL = the base currency
 - reminders(id, title, message, kind, account_id, frequency, day_of_month, day_of_week, month_of_year, date, time_of_day, nag_every_hours, enabled, next_run_at [ms epoch])
 - simulations(id, name, type, params JSON); settings(key, value) — key 'currency' = base currency`;
 
@@ -163,30 +163,33 @@ export const TOOLS = [
   tool({
     name: "get_spending_by_category",
     title: "Spending by category",
-    description: "Total spending per expense category (base currency) over a date range (default: current month), largest first.",
-    input: z.object({ from: isoDate.optional(), to: isoDate.optional() }),
+    description: "Total spending per expense category (base currency, or `currency`) over a date range (default: current month), largest first.",
+    input: z.object({ from: isoDate.optional(), to: isoDate.optional(), currency: z.string().optional() }),
     readOnly: true,
-    run: ({ from, to }, { userId }) => {
+    run: ({ from, to, currency }, { userId }) => {
       const m = monthBounds(today(userId).slice(0, 7));
-      return budgetSvc.spendingByCategory(userId, from ?? m.start, to ?? m.end);
+      return budgetSvc.spendingByCategory(userId, from ?? m.start, to ?? m.end, currency);
     },
   }),
   tool({
     name: "get_budget_status",
     title: "Budget status",
     description:
-      "For a month (default current): income, expenses, savings rate, and each category's budget vs spending (base currency) with a status (ok / ahead_of_pace / over / unbudgeted).",
-    input: z.object({ month: month.optional().describe("YYYY-MM") }),
+      "For a month (default current): income, expenses, savings rate, and each category's budget vs spending with a status (ok / ahead_of_pace / over / unbudgeted). Each envelope has its own currency (line.currency; budget/spent/remaining are in it, spending in other currencies converted at each transaction's date) and spentByCurrency shows what was actually paid in which currency. Income, expenses, totals and display* fields are in `currency` (default: base currency).",
+    input: z.object({
+      month: month.optional().describe("YYYY-MM"),
+      currency: z.string().optional().describe("Show income, expenses and totals in this currency, e.g. AED"),
+    }),
     readOnly: true,
-    run: ({ month }, { userId }) => budgetSvc.budgetStatus(userId, month),
+    run: ({ month, currency }, { userId }) => budgetSvc.budgetStatus(userId, month, { currency }),
   }),
   tool({
     name: "get_cashflow",
     title: "Monthly cash flow",
-    description: "Income, expenses, net savings and savings rate per month (base currency) for the last N months; transfers excluded.",
-    input: z.object({ months: z.number().int().min(1).max(60).default(12) }),
+    description: "Income, expenses, net savings and savings rate per month (base currency, or `currency`) for the last N months; transfers excluded.",
+    input: z.object({ months: z.number().int().min(1).max(60).default(12), currency: z.string().optional() }),
     readOnly: true,
-    run: ({ months }, { userId }) => budgetSvc.cashflow(userId, months),
+    run: ({ months, currency }, { userId }) => budgetSvc.cashflow(userId, months, currency),
   }),
   tool({
     name: "list_categories",
@@ -469,11 +472,12 @@ export const TOOLS = [
   tool({
     name: "set_budget",
     title: "Set monthly budget",
-    description: "Set the monthly budget (base currency) of an expense category. 0 removes the budget.",
-    input: z.object({ categoryId: z.number().int(), monthlyAmount: z.number().min(0) }),
+    description:
+      "Set the monthly budget of an expense category, in a currency of your choice (e.g. rent in EUR, groceries in AED; default: keep the envelope's currency, or the base currency for a new one). Spending in other currencies counts at each transaction's exchange rate. 0 removes the budget.",
+    input: z.object({ categoryId: z.number().int(), monthlyAmount: z.number().min(0), currency: z.string().optional() }),
     readOnly: false,
-    run: ({ categoryId, monthlyAmount }, { userId }) =>
-      budgetSvc.setBudget(userId, categoryId, monthlyAmount) ?? { removed: true },
+    run: ({ categoryId, monthlyAmount, currency }, { userId }) =>
+      budgetSvc.setBudget(userId, categoryId, monthlyAmount, currency) ?? { removed: true },
   }),
   tool({
     name: "create_account",

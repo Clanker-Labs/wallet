@@ -5,7 +5,8 @@ import { budgets, categories, transactions } from "@/server/db/schema";
 import { addMonths, monthBounds, monthRange } from "@/lib/dates";
 import { toCents } from "@/lib/money";
 import { requireCategory } from "./categories";
-import { fxConverter } from "./fx";
+import { fxConverter, type FxConverter } from "./fx";
+import { isCurrencyCode, normalizeCurrency } from "@/lib/domain";
 import { getSettings, today } from "./settings";
 
 export type BudgetLineStatus = "ok" | "ahead_of_pace" | "over" | "unbudgeted";
@@ -14,15 +15,23 @@ export interface BudgetLine {
   categoryId: number | null;
   name: string;
   icon: string | null;
+  /** The envelope's own currency; budget/spent/remaining below are in it. */
+  currency: string;
   budgetCents: number | null;
   spentCents: number;
   remainingCents: number | null;
   pct: number | null;
   status: BudgetLineStatus;
+  /** Budget and spending in the page's display currency, for totals. */
+  displayBudgetCents: number | null;
+  displaySpentCents: number;
+  /** What was actually spent, per transaction currency, when it isn't all in the envelope's. */
+  spentByCurrency: { currency: string; cents: number }[];
 }
 
 export interface BudgetStatus {
   month: string;
+  /** Display currency: income, expenses, totals and display… fields are in it. */
   currency: string;
   /** Fraction of the month elapsed (1 for past months). */
   elapsed: number;
@@ -32,37 +41,68 @@ export interface BudgetStatus {
   savingsRatePct: number | null;
   totalBudgetCents: number;
   totalSpentInBudgetsCents: number;
+  /** Currencies used this month or by an envelope (for the display switcher). */
+  currencies: string[];
+  /** Currencies with no exchange rate (their amounts count as 0 in conversions). */
+  missingFx: string[];
   lines: BudgetLine[];
 }
 
 export function listBudgets(uid: string) {
+  const base = getSettings(uid).currency;
   return db()
     .select({
       id: budgets.id,
       categoryId: budgets.categoryId,
       amountCents: budgets.amountCents,
+      currency: budgets.currency,
       name: categories.name,
       icon: categories.icon,
     })
     .from(budgets)
     .innerJoin(categories, eq(categories.id, budgets.categoryId))
     .where(eq(budgets.userId, uid))
-    .all();
+    .all()
+    .map((b) => ({ ...b, currency: b.currency ?? base }));
 }
 
-/** Set a monthly budget (base currency) for a category. 0 or null removes it. */
-export function setBudget(uid: string, categoryId: number, amount: number | null) {
+/**
+ * Set a category's monthly budget. `currency` sets the envelope's currency
+ * (default: keep the current one, or the base currency for a new envelope).
+ * 0 or null removes it.
+ */
+export function setBudget(uid: string, categoryId: number, amount: number | null, currency?: string | null) {
   requireCategory(uid, categoryId);
   if (!amount || amount <= 0) {
-    db().delete(budgets).where(eq(budgets.categoryId, categoryId)).run();
+    db().delete(budgets).where(and(eq(budgets.userId, uid), eq(budgets.categoryId, categoryId))).run();
     return null;
   }
+  const base = getSettings(uid).currency;
+  let cur: string | null | undefined = currency === undefined ? undefined : currency ? normalizeCurrency(currency) : null;
+  if (cur && !isCurrencyCode(cur)) throw new Error(`Unknown currency "${currency}"`);
+  if (cur === base) cur = null; // stored as "follow the base currency"
+  const values = { userId: uid, categoryId, amountCents: toCents(amount), currency: cur ?? null };
   return db()
     .insert(budgets)
-    .values({ userId: uid, categoryId, amountCents: toCents(amount) })
-    .onConflictDoUpdate({ target: budgets.categoryId, set: { amountCents: toCents(amount) } })
+    .values(values)
+    .onConflictDoUpdate({
+      target: budgets.categoryId,
+      set: cur === undefined ? { amountCents: values.amountCents } : { amountCents: values.amountCents, currency: values.currency },
+    })
     .returning()
     .get();
+}
+
+interface RawTotal {
+  date: string;
+  currency: string;
+  categoryId: number | null;
+  kind: "income" | "expense" | "transfer" | null;
+  name: string | null;
+  icon: string | null;
+  inCents: number;
+  outCents: number;
+  count: number;
 }
 
 interface CategoryTotal {
@@ -75,14 +115,9 @@ interface CategoryTotal {
   count: number;
 }
 
-/**
- * Money in / out per category (and month), converted to the user's base
- * currency at each transaction's date.
- */
-function categoryTotals(uid: string, from: string, to: string): (CategoryTotal & { month: string })[] {
-  const base = getSettings(uid).currency;
-  const fx = fxConverter();
-  const rows = db()
+/** Money in / out per category, transaction currency and day, unconverted. */
+function rawTotals(uid: string, from: string, to: string): RawTotal[] {
+  return db()
     .select({
       date: transactions.date,
       currency: transactions.currency,
@@ -99,13 +134,20 @@ function categoryTotals(uid: string, from: string, to: string): (CategoryTotal &
     .where(and(eq(transactions.userId, uid), gte(transactions.date, from), lte(transactions.date, to)))
     .groupBy(transactions.categoryId, transactions.currency, transactions.date)
     .all();
+}
+
+/**
+ * Money in / out per category (and month), converted to `target` at each
+ * transaction's date — so a June expense uses June's rate, not today's.
+ */
+function categoryTotals(rows: RawTotal[], target: string, fx: FxConverter): (CategoryTotal & { month: string })[] {
   const merged = new Map<string, CategoryTotal & { month: string }>();
   for (const r of rows) {
     const month = r.date.slice(0, 7);
     const key = `${month}|${r.categoryId ?? "none"}`;
     const acc = merged.get(key) ?? { month, categoryId: r.categoryId, kind: r.kind, name: r.name, icon: r.icon, inCents: 0, outCents: 0, count: 0 };
-    acc.inCents += fx.convertCents(r.inCents, r.currency, base, r.date);
-    acc.outCents += fx.convertCents(r.outCents, r.currency, base, r.date);
+    acc.inCents += fx.convertCents(r.inCents, r.currency, target, r.date);
+    acc.outCents += fx.convertCents(r.outCents, r.currency, target, r.date);
     acc.count += r.count;
     merged.set(key, acc);
   }
@@ -113,9 +155,9 @@ function categoryTotals(uid: string, from: string, to: string): (CategoryTotal &
 }
 
 /** Per-category totals over a range (months merged). */
-function totalsByCategory(uid: string, from: string, to: string): CategoryTotal[] {
+function totalsByCategory(rows: RawTotal[], target: string, fx: FxConverter): CategoryTotal[] {
   const merged = new Map<number | null, CategoryTotal>();
-  for (const r of categoryTotals(uid, from, to)) {
+  for (const r of categoryTotals(rows, target, fx)) {
     const acc = merged.get(r.categoryId) ?? { ...r, inCents: 0, outCents: 0, count: 0 };
     acc.inCents += r.inCents;
     acc.outCents += r.outCents;
@@ -149,21 +191,53 @@ function summarize(rows: Omit<CategoryTotal, "count">[]) {
   return { income, expenses, spentByCategory };
 }
 
-export function budgetStatus(uid: string, month = today(uid).slice(0, 7)): BudgetStatus {
+/** Net spending of one category per transaction currency (refunds net out). */
+function spentByCurrency(rows: RawTotal[], categoryId: number | null): { currency: string; cents: number }[] {
+  const by = new Map<string, number>();
+  for (const r of rows) {
+    if (r.categoryId !== categoryId || r.kind === "transfer" || r.kind === "income") continue;
+    const net = r.kind === "expense" ? r.outCents - r.inCents : r.outCents;
+    by.set(r.currency, (by.get(r.currency) ?? 0) + net);
+  }
+  return [...by].filter(([, c]) => c !== 0).map(([currency, cents]) => ({ currency, cents })).sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+/**
+ * A month's budget. Each envelope is tracked in its own currency (spending in
+ * other currencies converted at each transaction's date); income, expenses
+ * and the totals are shown in `opts.currency` (default: the base currency).
+ */
+export function budgetStatus(uid: string, month = today(uid).slice(0, 7), opts: { currency?: string } = {}): BudgetStatus {
   const { start, end } = monthBounds(month);
   const t = today(uid);
+  const base = getSettings(uid).currency;
+  const display = opts.currency ? normalizeCurrency(opts.currency) : base;
+  const fx = fxConverter();
   const daysInMonth = DateTime.fromISO(start).daysInMonth ?? 30;
   const elapsed =
     t > end ? 1 : t < start ? 0 : DateTime.fromISO(t).day / daysInMonth;
+  // Envelopes convert their budget to the display currency at month end (or today).
+  const rateDate = t < end ? t : end;
 
-  const rows = totalsByCategory(uid, start, end);
+  const raw = rawTotals(uid, start, end);
+  const rows = totalsByCategory(raw, display, fx);
   const { income, expenses, spentByCategory } = summarize(rows);
   const budgetRows = listBudgets(uid);
   const meta = new Map(rows.map((r) => [r.categoryId, r]));
+  const inCurrency = new Map<string, Map<number | null, number>>();
+  const spentIn = (currency: string, categoryId: number | null) => {
+    if (currency === display) return spentByCategory.get(categoryId) ?? 0;
+    if (!inCurrency.has(currency)) inCurrency.set(currency, summarize(totalsByCategory(raw, currency, fx)).spentByCategory);
+    return inCurrency.get(currency)!.get(categoryId) ?? 0;
+  };
+  const breakdown = (categoryId: number | null, currency: string) => {
+    const list = spentByCurrency(raw, categoryId);
+    return list.length === 1 && list[0].currency === currency ? [] : list;
+  };
 
   const lines: BudgetLine[] = [];
   for (const b of budgetRows) {
-    const spent = spentByCategory.get(b.categoryId) ?? 0;
+    const spent = spentIn(b.currency, b.categoryId);
     const pct = (spent / b.amountCents) * 100;
     // One fixed charge early in the month (a transit pass, a subscription) isn't "spending fast".
     const ahead = pct / 100 > elapsed + 0.1 && (meta.get(b.categoryId)?.count ?? 0) > 1;
@@ -172,11 +246,15 @@ export function budgetStatus(uid: string, month = today(uid).slice(0, 7)): Budge
       categoryId: b.categoryId,
       name: b.name,
       icon: b.icon,
+      currency: b.currency,
       budgetCents: b.amountCents,
       spentCents: spent,
       remainingCents: b.amountCents - spent,
       pct,
       status,
+      displayBudgetCents: fx.convertCents(b.amountCents, b.currency, display, rateDate),
+      displaySpentCents: spentByCategory.get(b.categoryId) ?? 0,
+      spentByCurrency: breakdown(b.categoryId, b.currency),
     });
   }
   const budgeted = new Set(budgetRows.map((b) => b.categoryId));
@@ -188,30 +266,34 @@ export function budgetStatus(uid: string, month = today(uid).slice(0, 7)): Budge
       categoryId,
       name: categoryId === null ? "Uncategorized" : (m?.name ?? "?"),
       icon: categoryId === null ? "❔" : (m?.icon ?? null),
+      currency: display,
       budgetCents: null,
       spentCents: spent,
       remainingCents: null,
       pct: null,
       status: "unbudgeted",
+      displayBudgetCents: null,
+      displaySpentCents: spent,
+      spentByCurrency: breakdown(categoryId, display),
     });
   }
   const order: Record<BudgetLineStatus, number> = { over: 0, ahead_of_pace: 1, ok: 2, unbudgeted: 3 };
-  lines.sort((a, b) => order[a.status] - order[b.status] || b.spentCents - a.spentCents);
+  lines.sort((a, b) => order[a.status] - order[b.status] || b.displaySpentCents - a.displaySpentCents);
 
-  const totalBudgetCents = budgetRows.reduce((s, b) => s + b.amountCents, 0);
-  const totalSpentInBudgetsCents = lines
-    .filter((l) => l.budgetCents !== null)
-    .reduce((s, l) => s + l.spentCents, 0);
+  const budgetedLines = lines.filter((l) => l.budgetCents !== null);
+  const currencies = [...new Set([base, display, ...raw.map((r) => r.currency), ...budgetRows.map((b) => b.currency)])].sort();
   return {
     month,
-    currency: getSettings(uid).currency,
+    currency: display,
     elapsed,
     incomeCents: income,
     expensesCents: expenses,
     netCents: income - expenses,
     savingsRatePct: income > 0 ? ((income - expenses) / income) * 100 : null,
-    totalBudgetCents,
-    totalSpentInBudgetsCents,
+    totalBudgetCents: budgetedLines.reduce((s, l) => s + (l.displayBudgetCents ?? 0), 0),
+    totalSpentInBudgetsCents: budgetedLines.reduce((s, l) => s + l.displaySpentCents, 0),
+    currencies,
+    missingFx: [...fx.missing],
     lines,
   };
 }
@@ -224,11 +306,15 @@ export interface CashflowMonth {
   savingsRatePct: number | null;
 }
 
-/** Income vs expenses per month (base currency), oldest first, including the current month. */
-export function cashflow(uid: string, months = 12): CashflowMonth[] {
+/** Income vs expenses per month (base currency, or `currency`), oldest first, including the current month. */
+export function cashflow(uid: string, months = 12, currency?: string): CashflowMonth[] {
   const thisMonth = today(uid).slice(0, 7);
   const list = monthRange(addMonths(thisMonth, -(months - 1)), thisMonth);
-  const rows = categoryTotals(uid, monthBounds(list[0]).start, monthBounds(thisMonth).end);
+  const rows = categoryTotals(
+    rawTotals(uid, monthBounds(list[0]).start, monthBounds(thisMonth).end),
+    currency ? normalizeCurrency(currency) : getSettings(uid).currency,
+    fxConverter(),
+  );
   return list.map((month) => {
     const { income, expenses } = summarize(rows.filter((r) => r.month === month));
     return {
@@ -241,9 +327,9 @@ export function cashflow(uid: string, months = 12): CashflowMonth[] {
   });
 }
 
-/** Spending per expense category over a date range, largest first. */
-export function spendingByCategory(uid: string, from: string, to: string) {
-  const rows = totalsByCategory(uid, from, to);
+/** Spending per expense category over a date range (base currency, or `currency`), largest first. */
+export function spendingByCategory(uid: string, from: string, to: string, currency?: string) {
+  const rows = totalsByCategory(rawTotals(uid, from, to), currency ? normalizeCurrency(currency) : getSettings(uid).currency, fxConverter());
   const { spentByCategory } = summarize(rows);
   const meta = new Map(rows.map((r) => [r.categoryId, r]));
   const total = [...spentByCategory.values()].reduce((a, b) => a + Math.max(0, b), 0);

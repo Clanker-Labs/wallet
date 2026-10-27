@@ -192,8 +192,9 @@ export function renderMonthlyReport(uid: string): string {
   if (over.length) {
     lines.push("", "🔴 <b>Over budget</b>");
     for (const l of over.slice(0, 3)) {
-      const excess = m(l.spentCents - l.budgetCents!, { ...whole, signed: true });
-      lines.push(`• ${icon(l.icon)}${esc(l.name)}: ${excess} (${m(l.spentCents, whole)} / ${m(l.budgetCents!, whole)})`);
+      const lm = { ...whole, currency: l.currency };
+      const excess = m(l.spentCents - l.budgetCents!, { ...lm, signed: true });
+      lines.push(`• ${icon(l.icon)}${esc(l.name)}: ${excess} (${m(l.spentCents, lm)} / ${m(l.budgetCents!, lm)})`);
     }
     if (over.length > 3) lines.push(`• …and ${over.length - 3} more`);
   } else if (budget.totalBudgetCents > 0) {
@@ -287,7 +288,7 @@ export function renderBudget(uid: string, month = today(uid).slice(0, 7)): strin
   for (const l of budgeted) {
     lines.push(
       `${STATUS_EMOJI[l.status]} ${icon(l.icon)}<b>${esc(l.name)}</b>`,
-      `${progressBar(l.pct ?? 0)} ${pct(l.pct ?? 0)} · ${m(l.spentCents, whole)} / ${m(l.budgetCents!, whole)}`,
+      `${progressBar(l.pct ?? 0)} ${pct(l.pct ?? 0)} · ${m(l.spentCents, { ...whole, currency: l.currency })} / ${m(l.budgetCents!, { ...whole, currency: l.currency })}`,
     );
   }
 
@@ -344,7 +345,7 @@ export function renderTransactionAdded(opts: {
     const line = budgetStatus(opts.uid).lines.find((l) => l.categoryId === category.id && l.budgetCents !== null);
     if (line) {
       lines.push(
-        `${STATUS_EMOJI[line.status]} ${m(line.spentCents, { whole: true })} / ${m(line.budgetCents!, { whole: true })} this month (${pct(line.pct ?? 0)})`,
+        `${STATUS_EMOJI[line.status]} ${m(line.spentCents, { whole: true, currency: line.currency })} / ${m(line.budgetCents!, { whole: true, currency: line.currency })} this month (${pct(line.pct ?? 0)})`,
       );
     }
   }

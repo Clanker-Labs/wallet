@@ -5,10 +5,11 @@ import { listAccounts } from "@/server/services/accounts";
 import { today } from "@/server/services/settings";
 import { serverFormat } from "@/server/format";
 import { currentMonth, formatDate, isISODate, monthRange } from "@/lib/dates";
-import { ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
+import { Button, ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
 import { ConfirmButton } from "@/components/accounts-ui";
 import { CategorizeProgress, CategoryCell, QuickAdd, TxFilters, TxProvider, type TxFilterValues } from "@/components/transactions-ui";
-import { deleteTransactionAction } from "./actions";
+import { deleteTransactionAction, matchTransfersAction } from "./actions";
+import { findTransferPairs } from "@/server/services/transfers";
 import { requireUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
@@ -66,6 +67,7 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
   }
   const totals = transactionTotals(uid, query);
   const uncategorized = countUncategorized(uid);
+  const transferPairs = uncategorized ? findTransferPairs(uid) : [];
   const categories = listCategories(uid).map((c) => ({ id: c.id, name: c.name, icon: c.icon, kind: c.kind }));
   const allAccounts = listAccounts(uid, { includeArchived: true });
   const activeAccounts = allAccounts.filter((a) => !a.archivedAt);
@@ -110,6 +112,29 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
             </>
           }
         />
+
+        {transferPairs.length > 0 && (
+          <Card className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <div className="min-w-0 text-sm">
+              <p className="font-medium">
+                {transferPairs.length} move{transferPairs.length > 1 ? "s" : ""} between your own accounts
+              </p>
+              <p className="text-ink-2">
+                {transferPairs
+                  .slice(0, 2)
+                  .map((p) => `${p.outAccount} → ${p.inAccount}, ${formatDate(p.date)}`)
+                  .join(" · ")}
+                {transferPairs.length > 2 && ` · +${transferPairs.length - 2} more`}. Filing them as transfers stops them counting as both
+                spending and income.
+              </p>
+            </div>
+            <form action={matchTransfersAction}>
+              <Button type="submit" size="sm" variant="primary">
+                Mark as transfers
+              </Button>
+            </form>
+          </Card>
+        )}
 
         <QuickAdd
           today={t}

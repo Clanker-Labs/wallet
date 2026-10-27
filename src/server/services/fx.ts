@@ -121,6 +121,126 @@ export function ensureFreshRates(opts: { force?: boolean; fetchImpl?: FetchLike 
   return inflight;
 }
 
+/**
+ * Daily ECB rates for a date range in one call (Frankfurter time series).
+ * Only the ~30 currencies the ECB publishes, and only on its working days.
+ */
+export async function fetchRateSeries(from: string, to: string, fetchImpl: FetchLike = fetch): Promise<RatesPayload[]> {
+  const res = await fetchImpl(`https://api.frankfurter.dev/v1/${from}..${to}?base=USD`, { signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`frankfurter series: HTTP ${res.status}`);
+  const j = (await res.json()) as { rates?: Record<string, Record<string, number>> };
+  if (!j?.rates) throw new Error("frankfurter series: unexpected payload");
+  return Object.entries(j.rates).map(([date, r]) => ({ date, perUsd: { ...upperKeys(r), USD: 1 } }));
+}
+
+/** The earliest date any user's money needs a rate for (capped at 10 years back). */
+function earliestNeededDate(): string | null {
+  const row = db()
+    .$client.prepare(
+      `SELECT min(d) AS d FROM (
+         SELECT min(date) AS d FROM transactions
+         UNION ALL SELECT min(date) FROM balance_snapshots
+         UNION ALL SELECT min(json_extract(loan_params, '$.startDate')) FROM accounts
+         UNION ALL SELECT min(json_extract(gratuity_params, '$.startDate')) FROM accounts
+       )`,
+    )
+    .get() as { d: string | null } | undefined;
+  if (!row?.d) return null;
+  const floor = new Date(Date.now() - 10 * 365 * 86_400_000).toISOString().slice(0, 10);
+  return row.d < floor ? floor : row.d;
+}
+
+const monthEnds = (from: string, to: string) => {
+  const out: string[] = [];
+  const d = new Date(`${from.slice(0, 7)}-01T00:00:00Z`);
+  for (;;) {
+    const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+    if (end >= to) break;
+    out.push(end);
+    d.setUTCMonth(d.getUTCMonth() + 1);
+  }
+  return out;
+};
+
+/** What Frankfurter (the ECB reference rates) publishes; everything else needs currency-api. */
+const ECB_CURRENCIES = new Set(
+  "AUD BGN BRL CAD CHF CNY CZK DKK EUR GBP HKD HUF IDR ILS INR ISK JPY KRW MXN MYR NOK NZD PHP PLN RON SEK SGD THB TRY USD ZAR".split(" "),
+);
+
+let lastHistoryRun = 0;
+
+/**
+ * Make past conversions use past rates. Without this, a 2024 EUR expense or
+ * a year-old snapshot of a French flat is converted at the rate of the day
+ * wallet was installed, and the chart shows no currency moves at all.
+ *
+ * Fills, from the earliest date anyone's data needs up to today: every ECB
+ * working day (one Frankfurter call per year), plus month-end rates from
+ * currency-api for the currencies the ECB lacks (AED, SAR, crypto…) that are
+ * in use. Throttled to twice a day per process; never throws.
+ */
+export async function ensureHistoricalRates(opts: { force?: boolean; fetchImpl?: FetchLike; maxCalls?: number } = {}): Promise<{ days: number; monthEnds: number; error?: string }> {
+  if (!opts.force && Date.now() - lastHistoryRun < 12 * 3_600_000) return { days: 0, monthEnds: 0 };
+  lastHistoryRun = Date.now();
+  const from = earliestNeededDate();
+  const today = todayISO("UTC");
+  if (!from || from >= today) return { days: 0, monthEnds: 0 };
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const have = (currency: string, a: string, b: string) =>
+    (db().$client.prepare("SELECT count(*) AS n FROM fx_rates WHERE currency = ? AND date BETWEEN ? AND ?").get(currency, a, b) as { n: number }).n;
+  let days = 0;
+  let filled = 0;
+  const errors: string[] = [];
+  // 1. ECB daily, year by year, only where EUR coverage is thin (< ~60% of working days).
+  for (let y = Number(from.slice(0, 4)); y <= Number(today.slice(0, 4)); y++) {
+    const a = y === Number(from.slice(0, 4)) ? from : `${y}-01-01`;
+    const b = y === Number(today.slice(0, 4)) ? today : `${y}-12-31`;
+    const workdays = Math.round(((Date.parse(b) - Date.parse(a)) / 86_400_000 + 1) * (5 / 7));
+    if (have("EUR", a, b) >= workdays * 0.6) continue;
+    try {
+      const series = await fetchRateSeries(a, b, fetchImpl);
+      // INSERT OR IGNORE: a richer currency-api day already stored keeps its rates.
+      const stmt = db().$client.prepare("INSERT OR IGNORE INTO fx_rates (currency, date, per_usd) VALUES (?, ?, ?)");
+      db().$client.transaction(() => {
+        for (const p of series) for (const [c, r] of Object.entries(p.perUsd)) stmt.run(c, p.date, r);
+      })();
+      days += series.length;
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : String(e));
+    }
+  }
+  // 2. Month-ends for in-use currencies the ECB doesn't publish.
+  const ecb = ECB_CURRENCIES;
+  const inUse = (
+    db()
+      .$client.prepare(
+        `SELECT DISTINCT upper(currency) AS c FROM accounts UNION SELECT upper(currency) FROM holdings
+         UNION SELECT upper(currency) FROM transactions UNION SELECT upper(currency) FROM budgets WHERE currency IS NOT NULL`,
+      )
+      .all() as { c: string }[]
+  ).map((r) => r.c);
+  const exotic = inUse.filter((c) => c !== "USD" && !ecb.has(c));
+  if (exotic.length) {
+    let calls = 0;
+    for (const date of monthEnds(from, today)) {
+      if (exotic.every((c) => have(c, date, date) > 0)) continue;
+      if (calls++ >= (opts.maxCalls ?? 36)) break; // the rest on the next run
+      try {
+        const p = await fetchRates(date, fetchImpl);
+        const stmt = db().$client.prepare("INSERT OR IGNORE INTO fx_rates (currency, date, per_usd) VALUES (?, ?, ?)");
+        db().$client.transaction(() => {
+          for (const [c, r] of Object.entries(p.perUsd)) stmt.run(c, p.date, r);
+        })();
+        filled++;
+      } catch (e) {
+        errors.push(`${date}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+  if (errors.length) console.warn(`[fx] history: ${errors.slice(0, 3).join("; ")}`);
+  return { days, monthEnds: filled, ...(errors.length ? { error: errors[0] } : {}) };
+}
+
 /** Fetch rates for past dates we don't have yet (e.g. month-ends for history). */
 export async function backfillRates(dates: string[], fetchImpl: FetchLike = fetch) {
   const have = new Set(

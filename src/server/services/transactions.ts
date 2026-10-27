@@ -4,12 +4,13 @@ import { z } from "zod";
 import { db } from "@/server/db/client";
 import { accounts, categories, transactions } from "@/server/db/schema";
 import { toCents } from "@/lib/money";
-import { isISODate } from "@/lib/dates";
+import { addDays, isISODate } from "@/lib/dates";
 import type { ImportRow } from "@/lib/csv-import";
 import { currencySchema, getAccountRow } from "./accounts";
 import { listRules, matchCategory, normalizePattern, requireCategory, upsertRule } from "./categories";
 import { fxConverter } from "./fx";
 import { getSettings, today } from "./settings";
+import { matchTransfers } from "./transfers";
 
 export const transactionInputSchema = z.object({
   date: z.string().refine(isISODate, "Expected YYYY-MM-DD").optional(),
@@ -52,6 +53,8 @@ function getTransactionRow(uid: string, id: number) {
 export function addTransaction(uid: string, raw: TransactionInput) {
   const input = transactionInputSchema.parse(raw);
   if (input.categoryId) requireCategory(uid, input.categoryId);
+  // Always, not only when the currency is looked up from it: the account must be the caller's.
+  if (input.accountId) getAccountRow(uid, input.accountId);
   const categoryId =
     input.categoryId === undefined ? matchCategory(input.description, listRules(uid)) : input.categoryId;
   return db()
@@ -241,6 +244,7 @@ export function importTransactions(
   accountId: number | null,
   opts: { currency?: string; source?: string } = {},
 ) {
+  if (accountId) getAccountRow(uid, accountId); // the caller's account, whatever the currency
   const fallbackCurrency = opts.currency ?? defaultCurrency(uid, accountId);
   const rules = listRules(uid);
   const ownCategories = new Set(
@@ -282,5 +286,11 @@ export function importTransactions(
       }
     }
   })();
-  return { inserted, duplicates: rows.length - inserted, categorized };
+  // Both sides of a move between your own accounts usually arrive in two imports: pair them now.
+  let transfers = 0;
+  if (inserted && rows.length) {
+    const dates = rows.map((r) => r.date).sort();
+    transfers = matchTransfers(uid, { from: addDays(dates[0], -3), to: addDays(dates.at(-1)!, 3) }).matched;
+  }
+  return { inserted, duplicates: rows.length - inserted, categorized, ...(transfers ? { transfers } : {}) };
 }

@@ -1,6 +1,6 @@
 import { snapshotHoldingAccounts } from "./accounts";
 import { syncStaleConnections } from "./connections";
-import { ensureFreshRates } from "./fx";
+import { ensureFreshRates, ensureHistoricalRates } from "./fx";
 import { refreshPrices } from "./prices";
 import { listUsers } from "./users";
 
@@ -17,6 +17,9 @@ export async function refreshMarketData(opts: { fetchImpl?: typeof fetch } = {})
     const fx = await ensureFreshRates({ fetchImpl: opts.fetchImpl });
     if (fx.status === "updated") log.push(`💱 rates updated to ${fx.date}`);
     if (fx.status === "failed") log.push(`⚠️ rates: ${fx.error}`);
+    const history = await ensureHistoricalRates({ fetchImpl: opts.fetchImpl });
+    if (history.days || history.monthEnds) log.push(`💱 past rates filled: ${history.days} days, ${history.monthEnds} month-ends`);
+    if (history.error) log.push(`⚠️ past rates: ${history.error}`);
     const prices = await refreshPrices({ fetchImpl: opts.fetchImpl });
     if (prices.updated.length) log.push(`📈 prices updated: ${prices.updated.join(", ")}`);
     if (prices.failed.length) log.push(`⚠️ prices: ${prices.failed.map((f) => f.error).join("; ")}`);

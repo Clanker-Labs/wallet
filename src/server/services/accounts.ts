@@ -185,6 +185,8 @@ function writeSnapshot(accountId: number, date: string, cents: number, note: str
 export function recordBalance(uid: string, raw: z.input<typeof recordBalanceSchema>) {
   const input = recordBalanceSchema.parse(raw);
   const account = getAccountRow(uid, input.accountId);
+  if (account.loanParams && input.balance !== 0)
+    throw new Error(`${account.name} follows its amortization schedule, so a recorded balance would be ignored. Change its loan terms instead (edit the account), or archive it once repaid.`);
   if (account.gratuityParams && input.balance !== 0)
     throw new Error(`${account.name} is a job: its balance is the gratuity computed from its salary and dates. Edit the job instead, or archive it once the gratuity is paid out.`);
   const date = input.date ?? today(uid);
@@ -242,7 +244,7 @@ type Snap = { date: string; balanceCents: number };
 
 /** Balance of one account on a date, in its own currency. */
 export function balanceOnDate(
-  account: Pick<Account, "id" | "currency" | "loanParams"> & Partial<Pick<Account, "gratuityParams">>,
+  account: Pick<Account, "id" | "currency" | "loanParams"> & Partial<Pick<Account, "gratuityParams" | "archivedAt" | "createdAt">>,
   snapshots: Snap[],
   date: string,
   ctx: ValuationContext,
@@ -268,7 +270,13 @@ export function balanceOnDate(
     found = s;
   }
   if (ctx.holdingsByAccount.has(account.id)) {
-    // Live value today; past days use the daily snapshots (or historical prices).
+    // Closed: its archive zero wins, even over today's live value of positions left in it.
+    if (account.archivedAt && date >= account.archivedAt) return { cents: 0, lastUpdated: account.archivedAt, derived: null };
+    // Before the account existed in wallet and before any snapshot, there is no history to show:
+    // valuing today's positions at last year's prices would invent a year of gains.
+    const created = account.createdAt ? new Date(account.createdAt).toISOString().slice(0, 10) : null;
+    if (!found && date < ctx.today && created && date < created) return { cents: 0, lastUpdated: null, derived: "holdings" };
+    // Live value today; past days use the daily snapshots (or historical prices since the account was added).
     if (date >= ctx.today || !found) {
       const v = holdingsValueCents(account, date, ctx);
       return { cents: v.cents, lastUpdated: v.asOf ?? ctx.today, derived: "holdings" };

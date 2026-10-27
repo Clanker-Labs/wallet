@@ -79,7 +79,7 @@ export function netWorthHistory(uid: string, months = 24): NetWorthPoint[] {
   dates.push(t);
   return dates.map((date) =>
     pointFrom(
-      accs.map((a) => withBalance(a, byAccount.get(a.id) ?? [], date, ctx)),
+      accs.filter((a) => !a.archivedAt || a.archivedAt > date).map((a) => withBalance(a, byAccount.get(a.id) ?? [], date, ctx)),
       date,
     ),
   );

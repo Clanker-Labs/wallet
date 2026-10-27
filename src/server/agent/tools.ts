@@ -11,6 +11,7 @@ import { ensureFreshRates, fxConverter, latestFxDate } from "@/server/services/f
 import { refreshPrices, searchSymbols } from "@/server/services/prices";
 import { netWorthDaily, netWorthHistory, netWorthMoves, netWorthOn } from "@/server/services/networth";
 import * as jobsSvc from "@/server/services/jobs";
+import { matchTransfers } from "@/server/services/transfers";
 import { getOverview } from "@/server/services/overview";
 import { getSettings, today } from "@/server/services/settings";
 import { purchaseInputSchema, simulatePurchase, capacityInputSchema, borrowingCapacity } from "@/lib/finance/mortgage";
@@ -367,14 +368,19 @@ export const TOOLS = [
       const { text } = await uploadsSvc.uploadText(upload);
       const parsed = parseCsv(text);
       const used: CsvMapping = mapping ?? guessMapping(parsed.headers);
-      const { ok, errors } = applyMapping(parsed.rows, used);
+      const { ok, errors, dateFormat } = applyMapping(parsed.rows, used);
       const preview = ok.slice(0, 5);
-      if (dryRun || !ok.length) {
-        return { headers: parsed.headers, mapping: used, parsedRows: ok.length, errors: errors.slice(0, 10), preview, imported: false };
+      const dateWarning = dateFormat.mixed
+        ? "The date column mixes day-first and month-first values — check the file."
+        : dateFormat.ambiguous
+          ? `Every day in the file is 12 or less, so day-first vs month-first can't be told apart; ${dateFormat.format === "dmy" ? "day-first" : "month-first"} was assumed. Ask the user or pass mapping.dateFormat.`
+          : undefined;
+      if (dryRun || !ok.length || dateFormat.mixed) {
+        return { headers: parsed.headers, mapping: used, dateFormat, dateWarning, parsedRows: ok.length, errors: errors.slice(0, 10), preview, imported: false };
       }
       const result = txSvc.importTransactions(userId, ok, accountId ?? null, { currency, source: "agent" });
       invalidateSqlSandbox(userId);
-      return { ...result, mapping: used, errorsCount: errors.length, errors: errors.slice(0, 10), preview, imported: true };
+      return { ...result, mapping: used, dateFormat, dateWarning, errorsCount: errors.length, errors: errors.slice(0, 10), preview, imported: true };
     },
   }),
   tool({
@@ -487,6 +493,25 @@ export const TOOLS = [
     input: accountsSvc.accountInputSchema,
     readOnly: false,
     run: (i, { userId }) => accountsSvc.createAccount(userId, i),
+  }),
+  tool({
+    name: "match_transfers",
+    title: "Match transfers between your accounts",
+    description:
+      "Find money moved between the user's own accounts — an uncategorized outflow on one account and an inflow on another within a few days, equal once converted (within ~2% for FX spread and fees, e.g. AED sent to a EUR account) — and file both sides under Transfers so budgets and cash flow stop counting them as spending and income. Runs automatically after imports; use dryRun to just list the pairs.",
+    input: z.object({
+      dryRun: z.boolean().default(false),
+      from: isoDate.optional(),
+      to: isoDate.optional(),
+      days: z.number().int().min(0).max(10).default(3).describe("Max days between the two sides"),
+      tolerancePct: z.number().min(0).max(10).default(2).describe("Max difference after conversion, %"),
+    }),
+    readOnly: false,
+    run: ({ dryRun, from, to, days, tolerancePct }, { userId }) => {
+      const r = matchTransfers(userId, { dryRun, from, to, days, tolerance: tolerancePct / 100 });
+      if (r.matched) invalidateSqlSandbox(userId);
+      return { matched: r.matched, pairs: r.pairs };
+    },
   }),
   tool({
     name: "save_job",

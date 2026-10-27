@@ -255,6 +255,10 @@ export const transactions = sqliteTable(
     notes: text("notes"),
     /** Dedupe key for imported rows (unique per user). */
     importHash: text("import_hash"),
+    /** Display name (from a rule or the user); the bank label in `description` is kept for matching. */
+    payee: text("payee"),
+    /** Free tags, e.g. ["trip-japan", "reimbursable"]. */
+    tags: text("tags", { mode: "json" }).$type<string[]>(),
     /** The recurring item (salary, rent, a subscription) this payment fulfils. */
     recurringId: integer("recurring_id").references((): AnySQLiteColumn => recurring.id, { onDelete: "set null" }),
     source: text("source").notNull().default("manual"),
@@ -277,9 +281,19 @@ export const categoryRules = sqliteTable(
     categoryId: integer("category_id")
       .notNull()
       .references(() => categories.id, { onDelete: "cascade" }),
+    /** How `pattern` is compared with the bank label. */
+    matchType: text("match_type").$type<"contains" | "starts" | "exact">().notNull().default("contains"),
+    /** Conditions (all optional): only this account, only money in/out, an amount range (absolute, in the row's currency). */
+    accountId: integer("account_id").references(() => accounts.id, { onDelete: "cascade" }),
+    direction: text("direction").$type<"in" | "out">(),
+    minAmountCents: integer("min_amount_cents"),
+    maxAmountCents: integer("max_amount_cents"),
+    /** Extra actions: show the payee under this name, add this tag. */
+    renameTo: text("rename_to"),
+    addTag: text("add_tag"),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("category_rules_user_pattern").on(t.userId, t.pattern)],
+  (t) => [index("category_rules_user").on(t.userId)],
 );
 
 /**
@@ -327,6 +341,27 @@ export const reminders = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index("reminders_user").on(t.userId)],
+);
+
+/**
+ * One payment over several categories (a supermarket receipt that is half
+ * groceries, half household). Splits sum to the transaction's amount; budgets
+ * and cash flow read the splits instead of the transaction's own category.
+ */
+export const transactionSplits = sqliteTable(
+  "transaction_splits",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    transactionId: integer("transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    userId: userId(),
+    categoryId: integer("category_id").references(() => categories.id, { onDelete: "set null" }),
+    /** Signed like the transaction, in its currency. */
+    amountCents: integer("amount_cents").notNull(),
+    note: text("note"),
+  },
+  (t) => [index("transaction_splits_tx").on(t.transactionId)],
 );
 
 /**

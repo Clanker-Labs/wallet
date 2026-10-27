@@ -386,7 +386,12 @@ export default async function SettingsPage() {
 
       <Card id="rules" className="scroll-mt-20">
         <CardHeader title="Categorization rules" subtitle="Longest matching text wins · applied on CSV import and on demand" />
-        <RulesEditor rules={rules} categories={categories} uncategorized={uncategorized} />
+        <RulesEditor
+          rules={rules}
+          categories={categories}
+          uncategorized={uncategorized}
+          accounts={listAccounts(uid).map((a) => ({ id: a.id, name: a.name }))}
+        />
       </Card>
 
       <Card id="connections" className="scroll-mt-20">

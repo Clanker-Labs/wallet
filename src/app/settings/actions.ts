@@ -13,7 +13,8 @@ import {
   deleteCategory,
   deleteRule,
   updateCategory,
-  upsertRule,
+  saveRule,
+  type RuleInput,
 } from "@/server/services/categories";
 import {
   createConnection,
@@ -94,11 +95,11 @@ export async function removeCategory(id: number): Promise<ActionResult> {
   return { ok: true, message: "Deleted" };
 }
 
-export async function addRule(input: { pattern: string; categoryId: number }): Promise<ActionResult> {
+export async function addRule(input: RuleInput): Promise<ActionResult> {
   const uid = await requireUid();
   if (!Number.isInteger(input.categoryId)) return { ok: false, error: "Pick a category" };
   try {
-    upsertRule(uid, input.pattern, input.categoryId);
+    saveRule(uid, input);
     refreshAll();
     return { ok: true, message: `Rule “${input.pattern.trim().toLowerCase()}” saved` };
   } catch (e) {

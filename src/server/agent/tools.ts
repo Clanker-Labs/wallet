@@ -54,9 +54,10 @@ const SQL_SCHEMA = `Tables (only your data; amounts are INTEGER cents in the row
 - holdings(id, account_id, symbol, name, asset_type, quantity REAL, currency, cost_basis REAL per unit, manual_price REAL, connection_id, external_id) — connection_id set = synced from a brokerage, overwritten by the next sync
 - prices(symbol, date, close REAL, currency) — daily closes of held symbols
 - fx_rates(currency, date, per_usd REAL) — units of currency per 1 USD
-- transactions(id, account_id, date, amount_cents [negative = spending], currency, description, category_id, notes, source)
+- transactions(id, account_id, date, amount_cents [negative = spending], currency, description [bank label], payee [display name], tags JSON array, category_id, recurring_id, notes, source)
+- transaction_splits(id, transaction_id, category_id, amount_cents) — parts of a split payment; when present they replace the transaction's category in totals
 - categories(id, name, kind ['income','expense','transfer'], icon)
-- category_rules(id, pattern, category_id) — lowercase substring of description → category
+- category_rules(id, pattern, category_id, match_type, account_id, direction, min_amount_cents, max_amount_cents, rename_to, add_tag) — rule: label match + optional conditions → category (+ payee rename, tag)
 - budgets(id, category_id, amount_cents, currency) — monthly envelope; currency NULL = the base currency
 - reminders(id, title, message, kind, account_id, frequency, day_of_month, day_of_week, month_of_year, date, time_of_day, nag_every_hours, enabled, next_run_at [ms epoch])
 - recurring(id, name, pattern, account_id, category_id, amount_cents [signed], currency, cadence, next_date, status ['active','suggested','paused','dismissed'], last_matched_date, last_change_pct) — expected payments; transactions.recurring_id links the real ones
@@ -150,13 +151,14 @@ export const TOOLS = [
     name: "list_transactions",
     title: "List transactions",
     description:
-      "Transactions, newest first, with category, account, currency and the amount converted to the base currency. Filter by date range, account, category (\"none\" = uncategorized) or a description search.",
+      "Transactions, newest first, with category, account, currency, payee (display name), tags, splitCount, recurringId and the amount converted to the base currency. Filter by date range, account, category (\"none\" = uncategorized), tag or a text search.",
     input: z.object({
       from: isoDate.optional(),
       to: isoDate.optional(),
       accountId: z.number().int().optional(),
       categoryId: z.union([z.number().int(), z.literal("none")]).optional(),
-      search: z.string().optional().describe("Case-insensitive substring of the description"),
+      search: z.string().optional().describe("Case-insensitive text in the bank label or payee"),
+      tag: z.string().optional().describe("Only transactions with this tag"),
       limit: z.number().int().min(1).max(500).default(50),
       offset: z.number().int().min(0).default(0),
     }),
@@ -468,6 +470,56 @@ export const TOOLS = [
     readOnly: false,
     run: ({ transactionIds, categoryId, rememberPattern }, { userId }) =>
       txSvc.categorizeTransactions(userId, transactionIds, categoryId, rememberPattern),
+  }),
+  tool({
+    name: "save_rule",
+    title: "Add or change a categorization rule",
+    description:
+      "A rule files transactions automatically (on add, on import, and with apply). Match the bank label (contains / starts / exact), optionally only on one account, only money in or out, or within an amount range; then set the category, and optionally rename the payee and add a tag. The most specific matching rule wins, then the longest pattern. Pass id to change a rule; set apply to also file existing uncategorized transactions.",
+    input: catSvc.ruleInputSchema.extend({ id: z.number().int().optional(), apply: z.boolean().default(true) }),
+    readOnly: false,
+    run: ({ apply, ...i }, { userId }) => {
+      const rule = catSvc.saveRule(userId, i);
+      const applied = apply ? catSvc.applyRulesToUncategorized(userId) : 0;
+      invalidateSqlSandbox(userId);
+      return { rule, applied };
+    },
+  }),
+  tool({
+    name: "delete_rule",
+    title: "Delete a rule",
+    description: "Delete a categorization rule. Transactions it filed keep their category.",
+    input: z.object({ id: z.number().int() }),
+    readOnly: false,
+    run: ({ id }, { userId }) => {
+      catSvc.deleteRule(userId, id);
+      return { deleted: id };
+    },
+  }),
+  tool({
+    name: "split_transaction",
+    title: "Split a transaction",
+    description:
+      "Split one payment over several categories (e.g. a supermarket receipt: groceries + household). Parts are signed like the transaction and must add up to it exactly; budgets then count each part in its category. An empty parts list removes the split.",
+    input: z.object({ transactionId: z.number().int(), parts: txSvc.splitInputSchema }),
+    readOnly: false,
+    run: ({ transactionId, parts }, { userId }) => {
+      const r = txSvc.setSplits(userId, transactionId, parts);
+      invalidateSqlSandbox(userId);
+      return { parts: r };
+    },
+  }),
+  tool({
+    name: "tag_transactions",
+    title: "Tag transactions",
+    description: "Add and/or remove free tags (e.g. trip-japan, reimbursable) on transactions. list_transactions filters by tag.",
+    input: z.object({ transactionIds: z.array(z.number().int()).max(1000), add: z.array(z.string()).optional(), remove: z.array(z.string()).optional() }),
+    readOnly: false,
+    run: ({ transactionIds, add, remove }, { userId }) => {
+      const r = txSvc.tagTransactions(userId, transactionIds, { add, remove });
+      invalidateSqlSandbox(userId);
+      return { ...r, tags: txSvc.listTags(userId) };
+    },
   }),
   tool({
     name: "create_category",

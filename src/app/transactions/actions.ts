@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
-import { addTransaction, categorizeTransactions, deleteTransaction } from "@/server/services/transactions";
+import { addTransaction, categorizeTransactions, deleteTransaction, listSplits, listTransactions, setSplits, tagTransactions } from "@/server/services/transactions";
 import { getCategory } from "@/server/services/categories";
 import { matchTransfers } from "@/server/services/transfers";
 import { parseAmount } from "@/lib/money";
@@ -99,4 +99,34 @@ export async function matchTransfersAction(): Promise<void> {
   const uid = await requireUid();
   matchTransfers(uid);
   refresh();
+}
+
+/** Replace a transaction's tags. */
+export async function saveTagsAction(id: number, tags: string[]): Promise<TxActionState> {
+  const uid = await requireUid();
+  try {
+    const current = listTransactions(uid, { limit: 1, offset: 0, ids: [id] }).rows[0]?.tags ?? [];
+    tagTransactions(uid, [id], { remove: current, add: tags });
+    refresh();
+    return { ok: true, message: "Tags saved" };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
+  }
+}
+
+/** Split a transaction over several categories (an empty list removes the split). */
+export async function saveSplitsAction(id: number, parts: { categoryId: number | null; amount: number; note?: string | null }[]): Promise<TxActionState> {
+  const uid = await requireUid();
+  try {
+    setSplits(uid, id, parts);
+    refresh();
+    return { ok: true, message: parts.length ? "Split saved" : "Split removed" };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
+  }
+}
+
+export async function loadSplitsAction(id: number) {
+  const uid = await requireUid();
+  return listSplits(uid, id).map((s) => ({ categoryId: s.categoryId, amount: s.amountCents / 100, note: s.note }));
 }

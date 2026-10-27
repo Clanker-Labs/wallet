@@ -21,6 +21,8 @@ import { Snippet } from "@/components/settings-kit";
 import { PreferencesForm } from "@/components/settings-preferences";
 import { CategoriesEditor, type CategoryItem } from "@/components/settings-categories";
 import { RulesEditor } from "@/components/settings-rules";
+import { BackupsPanel } from "@/components/settings-backups";
+import { backupDir, listBackups } from "@/server/services/backup";
 import { PasskeyList, type PasskeyItem } from "@/components/settings-security";
 import { RefreshRatesButton } from "@/components/settings-currency";
 import { TelegramLink } from "@/components/settings-telegram";
@@ -567,7 +569,10 @@ export default async function SettingsPage() {
           >
             <Download size={15} /> Export all data (JSON)
           </a>
-          <span className="text-xs text-muted">Everything except assistant chat transcripts.</span>
+          <span className="text-xs text-muted">Everything except assistant chat transcripts and brokerage keys.</span>
+        </div>
+        <div className="mt-5 border-t border-border pt-4">
+          <BackupsPanel backups={isOwner ? listBackups() : []} isOwner={isOwner} canImport={counts.accounts === 0 && counts.transactions === 0} dir={backupDir()} />
         </div>
         <dl className="mt-5 grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_minmax(0,1fr)] sm:gap-y-2">
           <dt className="text-muted">Database file</dt>

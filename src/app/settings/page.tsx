@@ -575,7 +575,11 @@ export default async function SettingsPage() {
           <span className="text-xs text-muted">Everything except assistant chat transcripts and brokerage keys.</span>
         </div>
         <div className="mt-5 border-t border-border pt-4">
-          <BackupsPanel backups={isOwner ? listBackups() : []} isOwner={isOwner} canImport={counts.accounts === 0 && counts.transactions === 0} dir={backupDir()} />
+          <BackupsPanel
+            backups={(isOwner ? listBackups() : []).map((b) => ({
+              ...b,
+              label: new Date(b.createdAt).toLocaleString(prefs.locale, { timeZone: prefs.timezone, dateStyle: "medium", timeStyle: "short" }),
+            }))} isOwner={isOwner} canImport={counts.accounts === 0 && counts.transactions === 0} dir={backupDir()} />
         </div>
         <dl className="mt-5 grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_minmax(0,1fr)] sm:gap-y-2">
           <dt className="text-muted">Database file</dt>
@@ -600,7 +604,7 @@ export default async function SettingsPage() {
                 <span className="min-w-0">{c.summary}</span>
                 <span className="shrink-0 text-xs text-muted">
                   {c.actorId && c.actorId !== uid ? `${c.actorName ?? "someone"} · ` : ""}
-                  {new Date(c.at).toLocaleString(prefs.locale, { dateStyle: "medium", timeStyle: "short" })}
+                  {new Date(c.at).toLocaleString(prefs.locale, { timeZone: prefs.timezone, dateStyle: "medium", timeStyle: "short" })}
                 </span>
               </li>
             ))}

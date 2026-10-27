@@ -10,6 +10,8 @@ export interface BackupItem {
   bytes: number;
   createdAt: string;
   reason: string;
+  /** Formatted on the server (your locale and time zone), so it hydrates as rendered. */
+  label?: string;
 }
 
 const REASON = { daily: "daily", manual: "by hand", "before-restore": "before a restore" } as Record<string, string>;
@@ -38,7 +40,7 @@ export function BackupsPanel({ backups, isOwner, canImport, dir }: { backups: Ba
               {backups.slice(0, 12).map((b) => (
                 <li key={b.name} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                   <span className="min-w-0">
-                    <span className="tabular">{new Date(b.createdAt).toLocaleString()}</span>
+                    <span className="tabular">{b.label ?? b.createdAt.slice(0, 16).replace("T", " ")}</span>
                     <span className="text-xs text-muted">
                       {" "}
                       · {REASON[b.reason] ?? b.reason} · {Math.max(1, Math.round(b.bytes / 1024))} KB

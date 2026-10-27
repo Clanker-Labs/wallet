@@ -106,7 +106,7 @@ export function createRecurring(uid: string, raw: RecurringInput, source: "manua
   const i = recurringInputSchema.parse(raw);
   if (i.accountId) getAccountRow(uid, i.accountId);
   if (i.categoryId) requireCategory(uid, i.categoryId);
-  return db()
+  const row = db()
     .insert(recurring)
     .values({
       userId: uid,
@@ -125,6 +125,8 @@ export function createRecurring(uid: string, raw: RecurringInput, source: "manua
     })
     .returning()
     .get();
+  audit(uid, "recurring", row.id, source === "detected" ? "suggest" : "create", `${source === "detected" ? "Found" : "Added"} recurring “${row.name}”: ${(row.amountCents / 100).toFixed(2)} ${row.currency}, ${row.cadence}`);
+  return row;
 }
 
 export function updateRecurring(uid: string, id: number, raw: Partial<RecurringInput>): Recurring {

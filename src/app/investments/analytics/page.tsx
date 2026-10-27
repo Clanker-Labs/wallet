@@ -21,9 +21,9 @@ function AllocationCard({ title, slices, label }: { title: string; slices: Slice
   return (
     <Card>
       <CardHeader title={title} />
-      <div className="flex items-center gap-4">
+      <div className="flex flex-col items-center gap-4 sm:flex-row xl:flex-col">
         <AllocationDonut size={120} slices={slices.map((s, i) => ({ key: s.key, label: f(s), cents: s.cents, slot: (i % 8) + 1 }))} />
-        <ul className="min-w-0 flex-1 space-y-1 text-sm">
+        <ul className="w-full min-w-0 flex-1 space-y-1 text-sm">
           {slices.slice(0, 6).map((s, i) => (
             <li key={s.key} className="flex items-center gap-2">
               <SeriesDot slot={(i % 8) + 1} />

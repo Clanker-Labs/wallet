@@ -187,3 +187,27 @@ export function priceReader() {
   };
 }
 export type PriceReader = ReturnType<typeof priceReader>;
+
+let lastHistory = 0;
+
+/**
+ * A year of daily prices for every held symbol that has less. Positions
+ * synced from a broker arrive with today's price only, and analytics, history
+ * and drawdowns need the year. Twice a day at most; never throws.
+ */
+export async function ensurePriceHistory(opts: { force?: boolean; fetchImpl?: FetchLike } = {}) {
+  if (!opts.force && Date.now() - lastHistory < 12 * 3_600_000) return { updated: [] as string[], failed: [] as { symbol: string; error: string }[] };
+  lastHistory = Date.now();
+  const cutoff = new Date(Date.now() - 300 * 86_400_000).toISOString().slice(0, 10);
+  const thin = (
+    db()
+      .$client.prepare(
+        `SELECT h.symbol AS symbol FROM (SELECT DISTINCT upper(symbol) AS symbol FROM holdings WHERE symbol IS NOT NULL AND quantity > 0) h
+         LEFT JOIN (SELECT symbol, min(date) AS first, count(*) AS n FROM prices GROUP BY symbol) p ON p.symbol = h.symbol
+         WHERE p.first IS NULL OR p.first > ? OR p.n < 150`,
+      )
+      .all(cutoff) as { symbol: string }[]
+  ).map((r) => r.symbol);
+  if (!thin.length) return { updated: [], failed: [] };
+  return refreshPrices({ symbols: thin.slice(0, 40), range: "1y", fetchImpl: opts.fetchImpl });
+}

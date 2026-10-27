@@ -17,6 +17,7 @@ const USER_TABLES = [
   "reminders",
   "simulations",
   "settings",
+  "recurring",
 ] as const;
 
 const TTL_MS = 15_000;

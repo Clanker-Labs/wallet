@@ -12,6 +12,7 @@ import { refreshPrices, searchSymbols } from "@/server/services/prices";
 import { netWorthDaily, netWorthHistory, netWorthMoves, netWorthOn } from "@/server/services/networth";
 import * as jobsSvc from "@/server/services/jobs";
 import { matchTransfers } from "@/server/services/transfers";
+import * as recurringSvc from "@/server/services/recurring";
 import { getOverview } from "@/server/services/overview";
 import { getSettings, today } from "@/server/services/settings";
 import { purchaseInputSchema, simulatePurchase, capacityInputSchema, borrowingCapacity } from "@/lib/finance/mortgage";
@@ -58,6 +59,7 @@ const SQL_SCHEMA = `Tables (only your data; amounts are INTEGER cents in the row
 - category_rules(id, pattern, category_id) — lowercase substring of description → category
 - budgets(id, category_id, amount_cents, currency) — monthly envelope; currency NULL = the base currency
 - reminders(id, title, message, kind, account_id, frequency, day_of_month, day_of_week, month_of_year, date, time_of_day, nag_every_hours, enabled, next_run_at [ms epoch])
+- recurring(id, name, pattern, account_id, category_id, amount_cents [signed], currency, cadence, next_date, status ['active','suggested','paused','dismissed'], last_matched_date, last_change_pct) — expected payments; transactions.recurring_id links the real ones
 - simulations(id, name, type, params JSON); settings(key, value) — key 'currency' = base currency`;
 
 const csvMappingSchema = z.object({
@@ -493,6 +495,71 @@ export const TOOLS = [
     input: accountsSvc.accountInputSchema,
     readOnly: false,
     run: (i, { userId }) => accountsSvc.createAccount(userId, i),
+  }),
+  tool({
+    name: "list_recurring",
+    title: "Recurring payments",
+    description:
+      "Salary, rent, subscriptions and other scheduled money: each item (expected amount and currency, cadence, next date, last matched payment, last price change), suggestions detected from history waiting to be accepted, the next 30 days of expected payments (late = expected and not arrived), monthly totals in the base currency, and a cash forecast. Items are expectations matched against real transactions — they never create transactions on their own.",
+    input: z.object({ days: z.number().int().min(1).max(365).default(30) }),
+    readOnly: true,
+    run: ({ days }, { userId }) => {
+      const f = recurringSvc.forecastCash(userId, days);
+      return {
+        items: recurringSvc.listRecurring(userId, { status: ["active", "paused"] }),
+        suggestions: recurringSvc.listRecurring(userId, { status: ["suggested"] }),
+        upcoming: recurringSvc.upcoming(userId, days),
+        summary: recurringSvc.recurringSummary(userId),
+        attention: recurringSvc.recurringNudges(userId),
+        forecast: { currency: f.currency, endCents: f.points.at(-1)?.cents, lowestCents: f.low.cents, lowestOn: f.low.date },
+      };
+    },
+  }),
+  tool({
+    name: "detect_recurring",
+    title: "Detect recurring payments",
+    description:
+      "Scan the last 18 months for payments that repeat (same payee and account, regular interval, similar amount) and store them as suggestions. Accept one with save_recurring (status active) or dismiss it (status dismissed).",
+    input: z.object({}),
+    readOnly: false,
+    run: (_i, { userId }) => ({ suggested: recurringSvc.suggestRecurring(userId) }),
+  }),
+  tool({
+    name: "save_recurring",
+    title: "Add or update a recurring payment",
+    description:
+      "Add a recurring item (omit id) or change one (id): salary (+amount), rent or a subscription (−amount), with its cadence and next expected date. Use status 'active' to accept a suggestion, 'paused' or 'dismissed' to stop it. Statements are matched to it automatically; nothing is created on a schedule.",
+    input: recurringSvc.recurringInputSchema.partial().extend({ id: z.number().int().optional() }),
+    readOnly: false,
+    run: ({ id, ...i }, { userId }) => {
+      const r = id ? recurringSvc.updateRecurring(userId, id, i) : recurringSvc.createRecurring(userId, recurringSvc.recurringInputSchema.parse(i));
+      recurringSvc.reconcileRecurring(userId);
+      return r;
+    },
+  }),
+  tool({
+    name: "delete_recurring",
+    title: "Delete a recurring payment",
+    description: "Delete a recurring item. Transactions already matched to it stay, unlinked.",
+    input: z.object({ id: z.number().int() }),
+    readOnly: false,
+    run: ({ id }, { userId }) => {
+      recurringSvc.deleteRecurring(userId, id);
+      return { deleted: id };
+    },
+  }),
+  tool({
+    name: "record_recurring_payment",
+    title: "Record a recurring payment",
+    description:
+      "Write the transaction for a recurring item that no statement will bring (cash rent, an account you don't import). If a statement later contains the same payment (same account and amount, within 5 days), the import takes this row over instead of duplicating it.",
+    input: z.object({ id: z.number().int(), date: isoDate.optional(), amount: z.number().optional() }),
+    readOnly: false,
+    run: ({ id, date, amount }, { userId }) => {
+      const row = recurringSvc.recordOccurrence(userId, id, { date, amount });
+      invalidateSqlSandbox(userId);
+      return row;
+    },
   }),
   tool({
     name: "match_transfers",

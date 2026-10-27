@@ -8,6 +8,7 @@ import {
   sqliteTable,
   text,
   uniqueIndex,
+  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import type { AccountType, AssetClass, HoldingType, LoanParams } from "@/lib/domain";
 import type { GratuityParams } from "@/lib/finance/gratuity";
@@ -254,6 +255,8 @@ export const transactions = sqliteTable(
     notes: text("notes"),
     /** Dedupe key for imported rows (unique per user). */
     importHash: text("import_hash"),
+    /** The recurring item (salary, rent, a subscription) this payment fulfils. */
+    recurringId: integer("recurring_id").references((): AnySQLiteColumn => recurring.id, { onDelete: "set null" }),
     source: text("source").notNull().default("manual"),
     createdAt: createdAt(),
   },
@@ -325,6 +328,46 @@ export const reminders = sqliteTable(
   },
   (t) => [index("reminders_user").on(t.userId)],
 );
+
+/**
+ * Something that happens on a schedule: salary, rent, a subscription. It is an
+ * EXPECTATION, never a transaction: statements bring the real payment, which
+ * is matched to it (transactions.recurringId), so nothing is ever counted
+ * twice. Detected from history (status "suggested" until accepted) or added
+ * by hand.
+ */
+export const recurring = sqliteTable(
+  "recurring",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: userId(),
+    name: text("name").notNull(),
+    /** Lowercase text the bank label contains ("netflix", "salary acme"). */
+    pattern: text("pattern").notNull(),
+    accountId: integer("account_id").references(() => accounts.id, { onDelete: "set null" }),
+    categoryId: integer("category_id").references(() => categories.id, { onDelete: "set null" }),
+    /** Expected amount, signed like a transaction (negative = money out), in `currency`. */
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    cadence: text("cadence").$type<RecurringCadence>().notNull(),
+    /** The next date it is expected (YYYY-MM-DD). */
+    nextDate: text("next_date").notNull(),
+    /** How far the amount may differ and still be this payment (%). */
+    tolerancePct: real("tolerance_pct").notNull().default(10),
+    /** How many days early or late it may arrive. */
+    windowDays: integer("window_days").notNull().default(5),
+    status: text("status").$type<"active" | "suggested" | "paused" | "dismissed">().notNull().default("active"),
+    source: text("source").$type<"detected" | "manual">().notNull().default("manual"),
+    lastMatchedDate: text("last_matched_date"),
+    lastAmountCents: integer("last_amount_cents"),
+    /** Last change of amount between two matched payments (%), e.g. a price rise. */
+    lastChangePct: real("last_change_pct"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("recurring_user").on(t.userId)],
+);
+
+export type RecurringCadence = "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
 
 export type ReminderKind = "custom" | "balance_update" | "statement" | "monthly_report";
 export type ReminderFrequency = "once" | "weekly" | "monthly" | "quarterly" | "yearly";

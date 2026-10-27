@@ -11,6 +11,7 @@ import { listRules, matchCategory, normalizePattern, requireCategory, upsertRule
 import { fxConverter } from "./fx";
 import { getSettings, today } from "./settings";
 import { matchTransfers } from "./transfers";
+import { reconcileRecurring } from "./recurring";
 
 export const transactionInputSchema = z.object({
   date: z.string().refine(isISODate, "Expected YYYY-MM-DD").optional(),
@@ -57,7 +58,7 @@ export function addTransaction(uid: string, raw: TransactionInput) {
   if (input.accountId) getAccountRow(uid, input.accountId);
   const categoryId =
     input.categoryId === undefined ? matchCategory(input.description, listRules(uid)) : input.categoryId;
-  return db()
+  const row = db()
     .insert(transactions)
     .values({
       userId: uid,
@@ -72,6 +73,8 @@ export function addTransaction(uid: string, raw: TransactionInput) {
     })
     .returning()
     .get();
+  reconcileRecurring(uid);
+  return row;
 }
 
 export function updateTransaction(uid: string, id: number, raw: Partial<TransactionInput>) {
@@ -132,6 +135,7 @@ export function listTransactions(uid: string, raw: TransactionFilter = {}) {
       categoryKind: categories.kind,
       accountId: transactions.accountId,
       accountName: accounts.name,
+      recurringId: transactions.recurringId,
     })
     .from(transactions)
     .leftJoin(categories, eq(categories.id, transactions.categoryId))
@@ -260,13 +264,36 @@ export function importTransactions(
     `INSERT OR IGNORE INTO transactions (user_id, account_id, date, amount_cents, currency, description, category_id, import_hash, source)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  // A payment typed in by hand (or recorded from a recurring item) that the
+  // statement now brings: same account, same amount, within a few days.
+  // The statement row takes it over instead of adding a second one.
+  const adoptable = db().$client.prepare(
+    `SELECT id FROM transactions
+     WHERE user_id = ? AND account_id = ? AND amount_cents = ? AND import_hash IS NULL AND source != 'csv'
+       AND date BETWEEN date(?, '-5 days') AND date(?, '+5 days')
+     ORDER BY abs(julianday(date) - julianday(?)) LIMIT 1`,
+  );
+  const adopt = db().$client.prepare(
+    "UPDATE transactions SET date = ?, description = ?, import_hash = ?, source = ? WHERE id = ?",
+  );
+  const hashTaken = db().$client.prepare("SELECT 1 FROM transactions WHERE user_id = ? AND import_hash = ?");
   let inserted = 0;
   let categorized = 0;
+  let adopted = 0;
   db().$client.transaction(() => {
     for (const row of rows) {
       const key = `${row.date}|${toCents(row.amount)}|${row.description.toLowerCase()}`;
       const occurrence = seen.get(key) ?? 0;
       seen.set(key, occurrence + 1);
+      if (accountId) {
+        const hash = importHash(accountId, row, occurrence);
+        const existing = !hashTaken.get(uid, hash) && (adoptable.get(uid, accountId, toCents(row.amount), row.date, row.date, row.date) as { id: number } | undefined);
+        if (existing) {
+          adopt.run(row.date, row.description, hash, opts.source ?? "csv", existing.id);
+          adopted++;
+          continue;
+        }
+      }
       const categoryId =
         row.categoryId && ownCategories.has(row.categoryId) ? row.categoryId : matchCategory(row.description, rules);
       const res = stmt.run(
@@ -292,5 +319,12 @@ export function importTransactions(
     const dates = rows.map((r) => r.date).sort();
     transfers = matchTransfers(uid, { from: addDays(dates[0], -3), to: addDays(dates.at(-1)!, 3) }).matched;
   }
-  return { inserted, duplicates: rows.length - inserted, categorized, ...(transfers ? { transfers } : {}) };
+  if (inserted || adopted) reconcileRecurring(uid);
+  return {
+    inserted,
+    duplicates: rows.length - inserted - adopted,
+    categorized,
+    ...(adopted ? { adopted } : {}),
+    ...(transfers ? { transfers } : {}),
+  };
 }

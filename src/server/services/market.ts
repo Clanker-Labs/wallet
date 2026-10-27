@@ -3,6 +3,7 @@ import { syncStaleConnections } from "./connections";
 import { ensureFreshRates, ensureHistoricalRates } from "./fx";
 import { refreshPrices } from "./prices";
 import { listUsers } from "./users";
+import { reconcileRecurring } from "./recurring";
 
 /**
  * Exchange rates, market prices, brokerage syncs, then today's value of
@@ -24,7 +25,10 @@ export async function refreshMarketData(opts: { fetchImpl?: typeof fetch } = {})
     if (prices.updated.length) log.push(`📈 prices updated: ${prices.updated.join(", ")}`);
     if (prices.failed.length) log.push(`⚠️ prices: ${prices.failed.map((f) => f.error).join("; ")}`);
     log.push(...(await syncStaleConnections({ fetchImpl: opts.fetchImpl })).log);
-    for (const u of listUsers()) snapshotHoldingAccounts(u.id);
+    for (const u of listUsers()) {
+      snapshotHoldingAccounts(u.id);
+      reconcileRecurring(u.id); // moves late items on, links anything that arrived
+    }
   } catch (e) {
     log.push(`⚠️ market data: ${e instanceof Error ? e.message : String(e)}`);
   }

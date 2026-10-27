@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertCircle, ArrowRight, Bell, Clock, CircleDollarSign, LineChart, Tag } from "lucide-react";
+import { AlertCircle, ArrowRight, Bell, CalendarClock, Clock, CircleDollarSign, LineChart, Tag, TrendingUp } from "lucide-react";
 import { getOverview } from "@/server/services/overview";
 import { netWorthDaily, netWorthHistory, netWorthMoves } from "@/server/services/networth";
 import { serverFormat } from "@/server/format";
@@ -19,6 +19,8 @@ const NUDGE_ICON = {
   pending_reminder: Bell,
   missing_rate: CircleDollarSign,
   missing_price: LineChart,
+  recurring_late: CalendarClock,
+  price_change: TrendingUp,
 };
 
 export default async function Dashboard() {
